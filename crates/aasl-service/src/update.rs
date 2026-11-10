@@ -90,15 +90,21 @@ impl Service {
         let updater = self.updater();
         let events = self.inner.events.clone();
         let kind = info.install.clone();
+        let mut last = None;
         let applied = self
             .exclusive("self_update", async move {
                 updater
                     .apply(&release, &kind, move |done, total| {
-                        let _ = events.send(Event::Progress {
-                            task: "AASL update".into(),
-                            done,
-                            total,
-                        });
+                        // One event per percent, not per network chunk.
+                        let pct = total.filter(|t| *t > 0).map(|t| done * 100 / t);
+                        if pct != last {
+                            last = pct;
+                            let _ = events.send(Event::Progress {
+                                task: "AASL update".into(),
+                                done,
+                                total,
+                            });
+                        }
                     })
                     .await
             })
