@@ -1,0 +1,23 @@
+[package]
+name = "aasl-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "AASL command line: install, launch and troubleshoot Somnium Space on Linux"
+
+[[bin]]
+name = "aasl"
+path = "src/main.rs"
+
+[dependencies]
+aasl-core.workspace = true
+aasl-service.workspace = true
+aasl-agent.workspace = true
+aasl-diag.workspace = true
+aasl-components.workspace = true
+aasl-patches.workspace = true
+aasl-system.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+clap = { version = "4", features = ["derive"] }

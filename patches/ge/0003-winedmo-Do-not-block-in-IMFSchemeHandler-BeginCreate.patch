@@ -1,0 +1,123 @@
+From b674499567f1ae8b7562c0663ad0faefdf7475f9 Mon Sep 17 00:00:00 2001
+From: Somnilux build <build@localhost>
+Date: Sat, 22 Aug 2026 01:18:15 +0100
+Subject: [PATCH 3/4] winedmo: Do not block in
+ IMFSchemeHandler::BeginCreateObject.
+
+BeginCreateObject called URLOpenBlockingStreamW inline, so it returned
+only once the whole resource had been downloaded. mfmediaengine calls it
+from media_engine_SetSource() with engine->cs held, so every other thread
+touching the media engine -- media_engine_HasAudio() on the app's main
+thread, for instance -- blocked for the duration. Somnium Space froze hard
+enough to look like a crash, and Wine logged a 60 second critical section
+timeout.
+
+Defer the stream setup to the work item the function already queues, so it
+runs on MFASYNC_CALLBACK_QUEUE_IO with no caller lock held. Since remote
+media is now opened by URL, nothing needs downloading up front and the
+byte stream is only a placeholder.
+---
+ dlls/winedmo/media_source.c | 48 ++++++++++++++++++++-----------------
+ 1 file changed, 26 insertions(+), 22 deletions(-)
+
+diff --git a/dlls/winedmo/media_source.c b/dlls/winedmo/media_source.c
+index f4443ff..f9ad92a 100644
+--- a/dlls/winedmo/media_source.c
++++ b/dlls/winedmo/media_source.c
+@@ -89,7 +89,7 @@ static ULONG WINAPI object_context_Release(IUnknown *iface)
+     if (!refcount)
+     {
+         IMFAsyncResult_Release(context->result);
+-        IMFByteStream_Release(context->stream);
++        if (context->stream) IMFByteStream_Release(context->stream);
+         free(context->url);
+         free(context);
+     }
+@@ -119,7 +119,7 @@ static HRESULT object_context_create(DWORD flags, IMFByteStream *stream, const W
+     context->IUnknown_iface.lpVtbl = &object_context_vtbl;
+     context->refcount = 1;
+     context->stream = stream;
+-    IMFByteStream_AddRef(context->stream);
++    if (context->stream) IMFByteStream_AddRef(context->stream);
+     context->file_size = file_size;
+     context->stream_offset = stream_offset;
+     context->url = tmp_url;
+@@ -130,6 +130,26 @@ static HRESULT object_context_create(DWORD flags, IMFByteStream *stream, const W
+     return S_OK;
+ }
+ 
++static HRESULT object_context_open_stream(struct object_context *context)
++{
++    IMFByteStream *bytestream;
++    IStream *stream;
++    HRESULT hr;
++
++    if (context->stream) return S_OK;
++    if (!context->url) return E_INVALIDARG;
++
++    if (FAILED(hr = CreateStreamOnHGlobal(0, TRUE, &stream)))
++        return hr;
++
++    hr = MFCreateMFByteStreamOnStream(stream, &bytestream);
++    IStream_Release(stream);
++    if (FAILED(hr)) return hr;
++
++    context->stream = bytestream;
++    return S_OK;
++}
++
+ /* ========================================================================
+  * IMediaBuffer — lightweight wrapper used with winedmo_demuxer_read
+  * ======================================================================== */
+@@ -2782,10 +2802,8 @@ static HRESULT WINAPI scheme_handler_BeginCreateObject(IMFSchemeHandler *iface,
+         IPropertyStore *props, IUnknown **cancel_cookie, IMFAsyncCallback *callback, IUnknown *state)
+ {
+     struct scheme_handler *handler = impl_from_IMFSchemeHandler(iface);
+-    IMFByteStream *bytestream;
+     IMFAsyncResult *result;
+     IUnknown *context;
+-    IStream *stream;
+     HRESULT hr;
+ 
+     TRACE("%p, %s, %#lx, %p, %p, %p, %p.\n", iface, debugstr_w(url), flags, props, cancel_cookie, callback, state);
+@@ -2793,25 +2811,9 @@ static HRESULT WINAPI scheme_handler_BeginCreateObject(IMFSchemeHandler *iface,
+     if (cancel_cookie)
+         *cancel_cookie = NULL;
+ 
+-    if (!wcsnicmp(url, L"http://", 7) || !wcsnicmp(url, L"https://", 8))
+-    {
+-        if (FAILED(hr = URLOpenBlockingStreamW(NULL, url, &stream, 0, NULL)))
+-        {
+-            WARN("Failed to open url %s, hr %#lx\n", debugstr_w(url), hr);
+-            return hr;
+-        }
+-    }
+-    else if (FAILED(hr = CreateStreamOnHGlobal(0, TRUE, &stream)))
+-        return hr;
+-
+-    hr = MFCreateMFByteStreamOnStream(stream, &bytestream);
+-    IStream_Release(stream);
+-    if (FAILED(hr))
+-        return hr;
+-
+     if (FAILED(hr = MFCreateAsyncResult(NULL, callback, state, &result)))
+         return hr;
+-    if (FAILED(hr = object_context_create(flags, bytestream, url, -1, 0, result, &context)))
++    if (FAILED(hr = object_context_create(flags, NULL, url, -1, 0, result, &context)))
+     {
+         IMFAsyncResult_Release(result);
+         return hr;
+@@ -2909,7 +2911,9 @@ static HRESULT WINAPI scheme_handler_callback_Invoke(IMFAsyncCallback *iface, IM
+     if (!state || !(context = impl_from_IUnknown(state)))
+         return E_INVALIDARG;
+ 
+-    if (FAILED(hr = media_source_create(context, (IMFMediaSource **)&object)))
++    if (FAILED(hr = object_context_open_stream(context)))
++        WARN("Failed to open stream, hr %#lx\n", hr);
++    else if (FAILED(hr = media_source_create(context, (IMFMediaSource **)&object)))
+         WARN("Failed to create media source, hr %#lx\n", hr);
+     else
+     {
+-- 
+2.55.0
+

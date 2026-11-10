@@ -1,0 +1,66 @@
+Somnilux ships prebuilt Wine binaries. This file records exactly what they
+were built from, so anyone can reproduce or relink them.
+
+Two sets, because they do not come from the same tree.
+
+scripts/build-artifacts.sh in this repository performs the whole build.
+
+
+================================================================================
+patches/wine/  ->  secur32, crypt32, rsaenh
+================================================================================
+
+  repository: https://github.com/wine-mirror/wine (mirror of the canonical
+              https://gitlab.winehq.org/wine/wine)
+  commit:     e99fc2f7587db7bc186293e9949fe0d3695cd430
+  date:       2026-08-14
+  version:    Wine 11.15
+
+To reproduce the exact source tree these patches were built against:
+
+  git clone https://github.com/wine-mirror/wine.git wine-source
+  cd wine-source
+  git checkout e99fc2f7587db7bc186293e9949fe0d3695cd430
+  for p in ../patches/wine/*.patch; do git am "$p"; done
+
+Each patch is one atomic, single-purpose commit, per Wine's own patch
+guidelines (https://gitlab.winehq.org/wine/wine/-/wikis/Submitting-Patches).
+0001 is independent of the rest. 0002-0004 build on each other in order.
+
+
+================================================================================
+patches/ge/  ->  winedmo, kernelbase
+================================================================================
+
+These cannot be built against upstream Wine. They patch code that only exists
+once GE-Proton's video rework is applied -- that rework removes winegstreamer
+and makes winedmo the sole Media Foundation backend, which upstream does not
+do.
+
+  wine:       https://github.com/ValveSoftware/wine
+  commit:     36078f5f947532885a596dabbc7893c048133660
+              (the wine submodule of GE-Proton11-5)
+  version:    Wine 11.0 (Proton)
+
+  then apply: patches/ge-video-rework/*.patch from
+              https://github.com/GloriousEggroll/proton-ge-custom
+              tag GE-Proton11-5
+
+To reproduce:
+
+  git init wine-ge && cd wine-ge
+  git remote add origin https://github.com/ValveSoftware/wine
+  git fetch --depth 1 origin 36078f5f947532885a596dabbc7893c048133660
+  git checkout FETCH_HEAD
+  for p in <proton-ge-custom>/patches/ge-video-rework/*.patch; do patch -Np1 < "$p"; done
+  for p in ../patches/ge/*.patch; do git am "$p"; done
+
+Two notes on that rework, both harmless. 0011-rsx (an unrelated RSX3D shim)
+does not apply and is not needed. The single hunk of 0006 that rewrites
+loader/wine.inf.in to register winedmo.dll instead of winegstreamer.dll must
+be applied by hand.
+
+Proton does not commit several generated files. Before configuring, run
+autoreconf -f, tools/make_requests, tools/make_specfiles, and
+dlls/winevulkan/make_vulkan -- the last chdirs internally, so it has to be
+run from its own directory.

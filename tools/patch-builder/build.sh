@@ -1,0 +1,168 @@
+#!/usr/bin/env bash
+# Build an AASL patch bundle for one Proton build.
+#
+# Adapted from Somnilux's scripts/build-artifacts.sh (MIT, Vulps22). The
+# differences: every input comes from the environment (aasl resolves them),
+# the Proton tree is fetched for the requested tag instead of a local
+# checkout, and the series list decides what gets built.
+#
+# Inputs (environment):
+#   PROVIDER PROTON_TAG PROTON_REPO   which Proton, e.g. ge GE-Proton11-12
+#   WINE_REPO WINE_COMMIT             that Proton's wine submodule
+#   SERIES                            space-separated series ids from series.toml
+#   PATCHES_DIR WORK_DIR OUT_DIR      directories
+#   ARCHIVE_FORMAT BUNDLE_NAME        output stamp and file name
+#   WITH_FFMPEG=1                     also build ffmpeg with dav1d (slow)
+set -euo pipefail
+
+: "${PROVIDER:?}" "${PROTON_TAG:?}" "${PROTON_REPO:?}" "${WINE_REPO:?}" "${WINE_COMMIT:?}"
+: "${SERIES:?}" "${PATCHES_DIR:?}" "${WORK_DIR:?}" "${OUT_DIR:?}" "${ARCHIVE_FORMAT:?}" "${BUNDLE_NAME:?}"
+WITH_FFMPEG="${WITH_FFMPEG:-0}"
+JOBS="${JOBS:-$(nproc)}"
+FFMPEG_VERSION="8.1"
+STAGE="$WORK_DIR/stage"
+
+say()  { printf '\n== %s\n' "$*"; }
+info() { printf '   %s\n' "$*"; }
+die()  { printf '\nFATAL %s\n' "$*" >&2; exit 1; }
+
+# series_field id key -> value (tiny reader for our own series.toml)
+series_field() {
+    awk -v id="$1" -v key="$2" '
+        /^\[\[series\]\]/ { cur = "" }
+        $1 == "id" { gsub(/"/, "", $3); cur = $3 }
+        cur == id && $1 == key { sub(/^[^=]*= */, ""); gsub(/[\[\]"]/, ""); gsub(/, */, " "); print; exit }
+    ' "$PATCHES_DIR/series.toml"
+}
+
+fetch_commit() { # dir repo commit
+    local dir="$1" repo="$2" commit="$3"
+    if [ ! -d "$dir/.git" ]; then
+        git init -q "$dir"
+        git -C "$dir" remote add origin "$repo"
+    fi
+    if [ "$(git -C "$dir" rev-parse HEAD 2>/dev/null || true)" != "$commit" ]; then
+        info "fetching $repo @ $commit"
+        git -C "$dir" fetch -q --depth 1 origin "$commit"
+        git -C "$dir" checkout -q -f FETCH_HEAD
+        git -C "$dir" clean -qfdx
+    fi
+}
+
+apply_series_patches() { # tree dir
+    local tree="$1" dir="$2" p
+    git -C "$tree" config user.email aasl@localhost
+    git -C "$tree" config user.name aasl
+    for p in "$PATCHES_DIR/$dir"/*.patch; do
+        info "apply $(basename "$p")"
+        git -C "$tree" am -q --3way "$p" || { git -C "$tree" am --abort || true; die "$(basename "$p") does not apply to this tree"; }
+    done
+}
+
+# GE-Proton applies its media rework on top of Valve's Wine; the media
+# series patches code that only exists after it.
+prep_ge_video_rework() { # tree
+    local tree="$1" ge="$WORK_DIR/proton-$PROTON_TAG" p failed=()
+    fetch_commit "$ge" "$PROTON_REPO" "$(git ls-remote "$PROTON_REPO" "refs/tags/$PROTON_TAG" | cut -f1)"
+    [ -d "$ge/patches/ge-video-rework" ] || die "$PROTON_TAG has no patches/ge-video-rework"
+    for p in "$ge"/patches/ge-video-rework/*.patch; do
+        if ( cd "$tree" && patch -Np1 --forward -s < "$p" >/dev/null ); then
+            info "rework $(basename "$p")"
+        else
+            failed+=("$(basename "$p")")
+        fi
+    done
+    # Register winedmo instead of winegstreamer (the one hunk that never
+    # applies cleanly, per Somnilux's notes).
+    sed -i 's/winegstreamer\.dll/winedmo.dll/g' "$tree/loader/wine.inf.in" || true
+    [ "${#failed[@]}" -eq 0 ] || info "rework patches that did not apply (usually harmless): ${failed[*]}"
+    git -C "$tree" add -A >/dev/null && git -C "$tree" -c user.email=aasl@localhost -c user.name=aasl commit -qm "GE video rework" || true
+}
+
+generate_proton_sources() { # tree
+    local tree="$1"
+    ( cd "$tree" && autoreconf -f >/dev/null 2>&1 ) || die "autoreconf failed"
+    ( cd "$tree" && ./tools/make_requests >/dev/null ) || die "make_requests failed"
+    ( cd "$tree" && ./tools/make_specfiles >/dev/null ) || die "make_specfiles failed"
+    if [ -f "$tree/dlls/winevulkan/make_vulkan" ] && [ ! -f "$tree/include/wine/vulkan.h" ]; then
+        ( cd "$tree/dlls/winevulkan" && python3 ./make_vulkan >/dev/null ) || die "make_vulkan failed"
+    fi
+}
+
+build_dlls() { # tree dll...
+    local tree="$1"; shift
+    mkdir -p "$tree/build"
+    [ -f "$tree/build/Makefile" ] || ( cd "$tree/build" && ../configure --enable-win64 >/dev/null ) || die "configure failed"
+    local d
+    for d in "$@"; do
+        info "make dlls/$d"
+        make -j"$JOBS" -C "$tree/build/dlls/$d" >/dev/null || die "build failed: $d"
+    done
+}
+
+stage() { install -Dm644 "$1" "$2"; info "$(printf '%10d  %s' "$(stat -c%s "$2")" "${2#$STAGE/}")"; }
+
+build_series() { # id
+    local id="$1" dir base dlls unix tree d
+    dir=$(series_field "$id" dir); base=$(series_field "$id" base)
+    dlls=$(series_field "$id" dlls); unix=$(series_field "$id" unix_libs)
+    [ -n "$dir" ] || die "unknown series $id"
+    say "Series $id ($base)"
+    if [ "$base" = upstream ]; then
+        tree="$WORK_DIR/wine-upstream-$id"
+        fetch_commit "$tree" "$(series_field "$id" upstream_repo)" "$(series_field "$id" upstream_commit)"
+    else
+        tree="$WORK_DIR/wine-$PROVIDER-$PROTON_TAG"
+        if [ ! -f "$tree/.aasl-prepared" ]; then
+            fetch_commit "$tree" "$WINE_REPO" "$WINE_COMMIT"
+            if [ "$(series_field "$id" requires_prep)" = ge-video-rework ]; then
+                if [ "$PROVIDER" = ge ]; then
+                    prep_ge_video_rework "$tree"
+                elif [ ! -f "$tree/dlls/winedmo/unix_demuxer.c" ]; then
+                    die "series $id needs the winedmo media backend, which $PROVIDER:$PROTON_TAG's Wine does not have. Build with SERIES=tls only."
+                fi
+            fi
+            touch "$tree/.aasl-prepared"
+        fi
+    fi
+    apply_series_patches "$tree" "$dir"
+    [ "$base" = proton ] && generate_proton_sources "$tree"
+    # shellcheck disable=SC2086
+    build_dlls "$tree" $dlls
+    for d in $dlls; do stage "$tree/build/dlls/$d/x86_64-windows/$d.dll" "$STAGE/x86_64-windows/$d.dll"; done
+    for d in $unix; do stage "$tree/build/dlls/$d/$d.so" "$STAGE/x86_64-unix/$d.so"; done
+}
+
+build_ffmpeg() {
+    say "ffmpeg $FFMPEG_VERSION with dav1d"
+    local src="$WORK_DIR/ffmpeg-$FFMPEG_VERSION" dst="$WORK_DIR/ffmpeg-dst" lib f
+    [ -d "$src" ] || curl -fsSL "https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VERSION.tar.xz" | tar -xJ -C "$WORK_DIR"
+    [ -f "$src/ffbuild/config.mak" ] || ( cd "$src" && ./configure --prefix="$dst" --libdir="$dst/lib" \
+        --arch=x86_64 --target-os=linux --enable-shared --disable-static --disable-everything --disable-programs \
+        --disable-doc --disable-inline-asm --enable-lzma --enable-bzlib --enable-gnutls --enable-demuxers \
+        --enable-protocol=https --enable-decoders --enable-encoders --enable-bsfs --disable-decoder=vvc \
+        --enable-libdav1d >/dev/null ) || die "ffmpeg configure failed"
+    make -j"$JOBS" -C "$src" >/dev/null && make -C "$src" install >/dev/null || die "ffmpeg build failed"
+    for f in avcodec avformat avutil swscale swresample; do
+        lib=$(ls "$dst/lib/lib$f.so."*.* | head -1)
+        stage "$lib" "$STAGE/x86_64-linux-gnu/$(basename "$lib")"
+    done
+}
+
+main() {
+    mkdir -p "$WORK_DIR" "$OUT_DIR"
+    rm -rf "$STAGE"; mkdir -p "$STAGE"
+    say "AASL patch bundle for $PROVIDER:$PROTON_TAG (wine $WINE_COMMIT)"
+    local s
+    for s in $SERIES; do build_series "$s"; done
+    [ "$WITH_FFMPEG" = 1 ] && build_ffmpeg
+    printf '%s\n' "$ARCHIVE_FORMAT" > "$STAGE/archive-format.txt"
+    cat > "$STAGE/manifest.json" <<EOF
+{"proton":"$PROVIDER:$PROTON_TAG","wine_repo":"$WINE_REPO","wine_commit":"$WINE_COMMIT","series":"$SERIES","built_at":"$(date -u +%FT%TZ)"}
+EOF
+    tar -czf "$OUT_DIR/$BUNDLE_NAME" -C "$STAGE" .
+    ( cd "$OUT_DIR" && sha256sum "$BUNDLE_NAME" > "$BUNDLE_NAME.sha256" )
+    say "Done: $OUT_DIR/$BUNDLE_NAME"
+}
+
+main "$@"

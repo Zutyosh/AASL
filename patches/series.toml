@@ -1,0 +1,25 @@
+# One entry per patch series. The builder applies every patch in `dir`
+# in file-name order on top of `base`:
+#   base = "upstream": upstream Wine at `upstream_commit`
+#   base = "proton":   the Wine submodule of the Proton being targeted,
+#                      after the provider's preparation step (GE's video
+#                      rework for GE-Proton)
+
+[[series]]
+id = "tls"
+title = "TLS client certificates (sign-in)"
+dir = "wine"
+base = "upstream"
+upstream_repo = "https://github.com/wine-mirror/wine.git"
+upstream_commit = "e99fc2f7587db7bc186293e9949fe0d3695cd430"
+dlls = ["secur32", "crypt32", "rsaenh"]
+unix_libs = ["secur32", "crypt32"]
+
+[[series]]
+id = "media"
+title = "Video playback (RTSP, HTTP media, yt-dlp)"
+dir = "ge"
+base = "proton"
+requires_prep = "ge-video-rework"
+dlls = ["winedmo", "kernelbase"]
+unix_libs = ["winedmo"]

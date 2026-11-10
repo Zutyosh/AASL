@@ -1,0 +1,82 @@
+From 7f5dd74bcc8e647b66d528caef08c5d112d292a5 Mon Sep 17 00:00:00 2001
+From: Somnilux build <build@localhost>
+Date: Sat, 22 Aug 2026 01:18:15 +0100
+Subject: [PATCH 2/4] winedmo: Let FFmpeg open remote http(s) media by URL.
+
+Only HLS playlists were opened by URL; everything else was handed to
+FFmpeg as a byte stream that the scheme handler had already downloaded in
+full. For a progressive mp4 that means fetching the entire file before the
+first frame can be decoded -- 185MB, several minutes, for a YouTube video
+in Somnium Space.
+
+FFmpeg has the https protocol built in and can range-request what it
+needs, so open all remote http(s) media by URL and keep the HLS format
+hint for playlists.
+
+parse_mp4_streams_metadata() has to be skipped on that path. It reads
+demuxer->ctx->pb->opaque as our stream_context, but when FFmpeg opens the
+URL it owns the AVIOContext and opaque is its own private state, so the
+parser walked a bogus pointer and segfaulted. HLS never hit this because
+its format name is "hls"; a progressive mp4 reports "mov,mp4,m4a" and does.
+---
+ dlls/winedmo/unix_demuxer.c | 26 ++++++++++++++++----------
+ 1 file changed, 16 insertions(+), 10 deletions(-)
+
+diff --git a/dlls/winedmo/unix_demuxer.c b/dlls/winedmo/unix_demuxer.c
+index 5421fad..2401e2a 100644
+--- a/dlls/winedmo/unix_demuxer.c
++++ b/dlls/winedmo/unix_demuxer.c
+@@ -750,8 +750,13 @@ static void parse_stream_names( struct demuxer *demuxer, UINT32 root, UINT64 siz
+ 
+ static void parse_mp4_streams_metadata( struct demuxer *demuxer )
+ {
+-    struct stream_context *context = demuxer->ctx->pb->opaque;
+-    int64_t pos = context->position;
++    struct stream_context *context;
++    int64_t pos;
++
++    if (demuxer->direct_url || !demuxer->ctx->pb) return;
++
++    context = demuxer->ctx->pb->opaque;
++    pos = context->position;
+ 
+     if (context->length == -1) return;
+ 
+@@ -760,6 +765,11 @@ static void parse_mp4_streams_metadata( struct demuxer *demuxer )
+     unix_seek_callback( context, pos, SEEK_SET );
+ }
+ 
++static BOOL is_http_url( const char *url )
++{
++    return url && (!strncmp( url, "http://", 7 ) || !strncmp( url, "https://", 8 ));
++}
++
+ static BOOL is_http_hls_url( const char *url )
+ {
+     if (!url || (strncmp( url, "http://", 7 ) && strncmp( url, "https://", 8 ))) return FALSE;
+@@ -844,18 +854,14 @@ NTSTATUS demuxer_create( void *arg )
+     demuxer->stream_context = params->context;
+ 
+     if (!(demuxer->ctx = avformat_alloc_context())) goto failed;
+-    if (is_http_hls_url( params->url ))
++    if (is_http_url( params->url ))
+     {
+-        const AVInputFormat *hls = av_find_input_format( "hls" );
++        const AVInputFormat *format_hint = is_http_hls_url( params->url ) ? av_find_input_format( "hls" ) : NULL;
+ 
+-        /* HLS playlists need the source URL as their base URI so relative
+-         * segment URLs can be resolved.  The custom bytestream path only
+-         * exposes the downloaded manifest bytes, which breaks YouTube HLS
+-         * streams used by VRChat's in-game video player. */
+         demuxer->direct_url = TRUE;
+-        if ((ret = avformat_open_input( &demuxer->ctx, params->url, hls, NULL )) < 0)
++        if ((ret = avformat_open_input( &demuxer->ctx, params->url, format_hint, NULL )) < 0)
+         {
+-            ERR( "Failed to open HLS URL, error %s.\n", debugstr_averr(ret) );
++            ERR( "Failed to open URL, error %s.\n", debugstr_averr(ret) );
+             goto failed;
+         }
+     }
+-- 
+2.55.0
+

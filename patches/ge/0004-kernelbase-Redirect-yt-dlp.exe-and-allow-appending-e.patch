@@ -1,0 +1,116 @@
+From 52948a76e26a00251ce812e61f11895013030d9c Mon Sep 17 00:00:00 2001
+From: Somnilux build <build@localhost>
+Date: Sat, 22 Aug 2026 16:12:09 +0100
+Subject: [PATCH 4/4] kernelbase: Redirect yt-dlp.exe and allow appending
+ extractor args.
+
+Somnium Space resolves video URLs by running a bundled yt-dlp.exe with
+--get-url, and takes the single URL it prints. Current yt-dlp defaults to
+the visionOS InnerTube client, which offers no muxed format for most
+YouTube videos -- every rendition is video-only -- so the URL handed to
+AVPro has no audio track at all. No sound, and the audio-reactive lighting
+that reads the player's AudioSource stays dark. The android client still
+serves itag 18 (h264 + AAC in one stream), which plays with sound.
+
+Import Proton's yt-dlp.exe hook, which rewrites the executable path from
+PROTON_YTDLP_PATH and appends --cookies-from-browser from
+PROTON_YTDLP_BROWSER, and extend it with PROTON_YTDLP_EXTRACTOR_ARGS so a
+client can be selected without patching the application. Setting it to
+youtube:player_client=android restores audio, at the cost of 360p, which
+is the highest muxed format YouTube still offers.
+
+Both variables are unset by default, leaving behaviour unchanged.
+
+Co-authored-by: Torge Matthies <openglfreak@googlemail.com>
+---
+ dlls/kernelbase/process.c | 67 +++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 67 insertions(+)
+
+diff --git a/dlls/kernelbase/process.c b/dlls/kernelbase/process.c
+index e07cfee..468fbbe 100644
+--- a/dlls/kernelbase/process.c
++++ b/dlls/kernelbase/process.c
+@@ -589,6 +589,70 @@ static int battleye_launcher_redirect_hack( const WCHAR *app_name, WCHAR *new_na
+     return 1;
+ }
+ 
++static int ytdlp_hack( const WCHAR *app_name, WCHAR *new_name, DWORD new_name_len, WCHAR **cmdline )
++{
++    static const WCHAR ytdlp_exeW[] = L"yt-dlp.exe";
++    static const size_t ytdlp_exeW_len = ARRAY_SIZE(ytdlp_exeW) - 1;
++    static const WCHAR cookiesfrombrowserW[] = L" --cookies-from-browser ";
++    static const size_t cookiesfrombrowserW_len = ARRAY_SIZE(cookiesfrombrowserW) - 1;
++    static const WCHAR extractorargsW[] = L" --extractor-args ";
++    static const size_t extractorargsW_len = ARRAY_SIZE(extractorargsW) - 1;
++
++    WCHAR ytdlp_path[MAX_PATH], browser[32 + MAX_PATH], extractor_args[256];
++    WCHAR *new_cmdline = NULL;
++    size_t len, new_len;
++
++    if (!app_name || !*cmdline)
++        return 0;
++
++    len = wcslen( app_name );
++    if (len < ytdlp_exeW_len + 1)
++        return 0;
++    if (app_name[len - ytdlp_exeW_len - 1] != '\\' && app_name[len - ytdlp_exeW_len - 1] != '/')
++        return 0;
++    if (wcscmp( app_name + (len - ytdlp_exeW_len), ytdlp_exeW ))
++        return 0;
++
++    ytdlp_path[0] = 0;
++    GetEnvironmentVariableW(L"PROTON_YTDLP_PATH", ytdlp_path, ARRAY_SIZE(ytdlp_path));
++    if (wcslen( ytdlp_path ) >= new_name_len)
++        return 0;
++
++    browser[0] = 0;
++    GetEnvironmentVariableW(L"PROTON_YTDLP_BROWSER", browser, ARRAY_SIZE(browser));
++    extractor_args[0] = 0;
++    GetEnvironmentVariableW(L"PROTON_YTDLP_EXTRACTOR_ARGS", extractor_args, ARRAY_SIZE(extractor_args));
++
++    if (browser[0] || extractor_args[0])
++    {
++        new_len = wcslen( *cmdline ) + 1;
++        if (browser[0]) new_len += cookiesfrombrowserW_len + wcslen( browser );
++        if (extractor_args[0]) new_len += extractorargsW_len + wcslen( extractor_args );
++        if (!(new_cmdline = RtlAllocateHeap( GetProcessHeap(), 0, new_len * sizeof(WCHAR) )))
++            return 0;
++    }
++
++    if (ytdlp_path[0])
++        wcscpy( new_name, ytdlp_path );
++    if (new_cmdline)
++    {
++        wcscpy( new_cmdline, *cmdline );
++        if (browser[0])
++        {
++            wcscat( new_cmdline, cookiesfrombrowserW );
++            wcscat( new_cmdline, browser );
++        }
++        if (extractor_args[0])
++        {
++            wcscat( new_cmdline, extractorargsW );
++            wcscat( new_cmdline, extractor_args );
++        }
++        HeapFree( GetProcessHeap(), 0, *cmdline );
++        *cmdline = new_cmdline;
++    }
++    return ytdlp_path[0];
++}
++
+ static const WCHAR *hack_append_command_line( const WCHAR *cmd )
+ {
+     static const struct
+@@ -756,6 +820,9 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR
+     if (battleye_launcher_redirect_hack( app_name, name, ARRAY_SIZE(name), &orig_app_name, product_name ))
+         app_name = name;
+ 
++    if (ytdlp_hack( app_name, name, ARRAY_SIZE(name), &tidy_cmdline ))
++        app_name = name;
++
+     /* Warn if unsupported features are used */
+ 
+     if (flags & (IDLE_PRIORITY_CLASS | HIGH_PRIORITY_CLASS | REALTIME_PRIORITY_CLASS |
+-- 
+2.55.0
+

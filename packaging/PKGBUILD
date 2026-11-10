@@ -1,0 +1,36 @@
+# Maintainer: AASL contributors
+pkgname=aasl
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Install, launch and troubleshoot Somnium Space on Linux"
+arch=('x86_64')
+url="https://github.com/Zutyosh/AASL"
+license=('MIT')
+depends=('python' 'fontconfig' 'libxkbcommon' 'vulkan-icd-loader')
+optdepends=('imagemagick: menu icon conversion'
+            'vulkan-tools: GPU diagnostics')
+makedepends=('cargo' 'clang')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
+# The archive unpacks to AASL-$pkgver.
+sha256sums=('SKIP')
+
+build() {
+    cd "$srcdir/AASL-$pkgver"
+    cargo build --release --locked -p aasl-cli -p aasl-gui
+}
+
+check() {
+    cd "$srcdir/AASL-$pkgver"
+    cargo test --release --locked --workspace --exclude aasl-gui
+}
+
+package() {
+    cd "$srcdir/AASL-$pkgver"
+    install -Dm755 target/release/aasl "$pkgdir/usr/bin/aasl"
+    install -Dm755 target/release/aasl-gui "$pkgdir/usr/bin/aasl-gui"
+    install -Dm644 packaging/aasl.desktop "$pkgdir/usr/share/applications/aasl.desktop"
+    install -Dm644 assets/aasl-256.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/aasl.png"
+    install -Dm644 assets/aasl-logo.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/aasl.svg"
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+    install -Dm644 patches/LICENSE "$pkgdir/usr/share/licenses/$pkgname/PATCHES-LGPL"
+}

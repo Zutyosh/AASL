@@ -1,0 +1,152 @@
+From 3c54d2d581b43945a94af8499f0ab74d39b821b5 Mon Sep 17 00:00:00 2001
+From: Somnilux build <build@localhost>
+Date: Fri, 21 Aug 2026 23:08:47 +0100
+Subject: [PATCH 1/4] winedmo: Open RTSP streams by URL.
+
+Somnium Space and VRChat both play live streams from VRCDN, which hands
+out rtspt:// URLs. Media Foundation had no scheme handler registered for
+them, so source resolution failed before winedmo was ever consulted and
+AVPro Video reported only "Failed to open".
+
+Register the RTSP scheme variants alongside the rtsp: entry already
+present, and open them the way HLS playlists are opened, by handing the
+URL to FFmpeg directly rather than wrapping it in a byte stream.
+
+FFmpeg has no rtspt/rtspu/rtsph scheme; those select a transport for the
+plain rtsp scheme. Rewrite them to rtsp:// (or rtsps:// for the TLS
+forms) and pass the transport through the rtsp_transport option instead.
+---
+ dlls/winedmo/unix_demuxer.c | 61 +++++++++++++++++++++++++++++++++++++
+ dlls/winedmo/winedmo.rgs    | 28 +++++++++++++++++
+ 2 files changed, 89 insertions(+)
+
+diff --git a/dlls/winedmo/unix_demuxer.c b/dlls/winedmo/unix_demuxer.c
+index 7c12194..5421fad 100644
+--- a/dlls/winedmo/unix_demuxer.c
++++ b/dlls/winedmo/unix_demuxer.c
+@@ -767,6 +767,47 @@ static BOOL is_http_hls_url( const char *url )
+     return !!strstr( url, ".m3u8" ) || !!strstr( url, "/hls_playlist/" );
+ }
+ 
++static BOOL parse_rtsp_url( const char *url, char **direct_url, const char **transport )
++{
++    static const struct
++    {
++        const char *scheme;
++        const char *target;
++        const char *transport;
++    }
++    schemes[] =
++    {
++        { "rtsp://",   "rtsp://",  NULL },
++        { "rtspt://",  "rtsp://",  "tcp" },
++        { "rtspu://",  "rtsp://",  "udp" },
++        { "rtsph://",  "rtsp://",  "http" },
++        { "rtsps://",  "rtsps://", NULL },
++        { "rtspst://", "rtsps://", "tcp" },
++        { "rtspsu://", "rtsps://", "udp" },
++        { "rtspsh://", "rtsps://", "http" },
++    };
++    UINT i;
++
++    if (!url) return FALSE;
++
++    for (i = 0; i < ARRAY_SIZE(schemes); i++)
++    {
++        const char *rest = url + strlen( schemes[i].scheme );
++        char *buffer;
++
++        if (strncmp( url, schemes[i].scheme, strlen( schemes[i].scheme ) )) continue;
++        if (!(buffer = malloc( strlen( schemes[i].target ) + strlen( rest ) + 1 ))) return FALSE;
++
++        strcpy( buffer, schemes[i].target );
++        strcat( buffer, rest );
++        *direct_url = buffer;
++        *transport = schemes[i].transport;
++        return TRUE;
++    }
++
++    return FALSE;
++}
++
+ static void demuxer_free_context( struct demuxer *demuxer )
+ {
+     if (!demuxer->ctx) return;
+@@ -784,8 +825,10 @@ NTSTATUS demuxer_create( void *arg )
+ {
+     struct demuxer_create_params *params = arg;
+     const char *ext = params->url ? strrchr( params->url, '.' ) : NULL;
++    const char *rtsp_transport;
+     const AVInputFormat *format;
+     struct demuxer *demuxer;
++    char *rtsp_url;
+     int i, ret;
+ 
+     TRACE( "context %p, url %s, mime %s\n", params->context, debugstr_a(params->url), debugstr_a(params->mime_type) );
+@@ -816,6 +859,24 @@ NTSTATUS demuxer_create( void *arg )
+             goto failed;
+         }
+     }
++    else if (parse_rtsp_url( params->url, &rtsp_url, &rtsp_transport ))
++    {
++        const AVInputFormat *rtsp = av_find_input_format( "rtsp" );
++        AVDictionary *options = NULL;
++
++        if (rtsp_transport) av_dict_set( &options, "rtsp_transport", rtsp_transport, 0 );
++
++        demuxer->direct_url = TRUE;
++        ret = avformat_open_input( &demuxer->ctx, rtsp_url, rtsp, &options );
++        av_dict_free( &options );
++        free( rtsp_url );
++
++        if (ret < 0)
++        {
++            ERR( "Failed to open RTSP URL, error %s.\n", debugstr_averr(ret) );
++            goto failed;
++        }
++    }
+     else
+     {
+         if (!(demuxer->ctx->pb = avio_alloc_context( NULL, 0, 0, params->context, unix_read_callback, NULL,
+diff --git a/dlls/winedmo/winedmo.rgs b/dlls/winedmo/winedmo.rgs
+index a267532..56b2126 100644
+--- a/dlls/winedmo/winedmo.rgs
++++ b/dlls/winedmo/winedmo.rgs
+@@ -62,6 +62,34 @@ HKLM
+                     {
+                         val '{587eeb6a-7336-4ebd-a4f2-91c948de622c}' = s 'winedmo Scheme Handler'
+                     }
++                    'rtspt:'
++                    {
++                        val '{587eeb6a-7336-4ebd-a4f2-91c948de622c}' = s 'winedmo Scheme Handler'
++                    }
++                    'rtspu:'
++                    {
++                        val '{587eeb6a-7336-4ebd-a4f2-91c948de622c}' = s 'winedmo Scheme Handler'
++                    }
++                    'rtsph:'
++                    {
++                        val '{587eeb6a-7336-4ebd-a4f2-91c948de622c}' = s 'winedmo Scheme Handler'
++                    }
++                    'rtsps:'
++                    {
++                        val '{587eeb6a-7336-4ebd-a4f2-91c948de622c}' = s 'winedmo Scheme Handler'
++                    }
++                    'rtspst:'
++                    {
++                        val '{587eeb6a-7336-4ebd-a4f2-91c948de622c}' = s 'winedmo Scheme Handler'
++                    }
++                    'rtspsu:'
++                    {
++                        val '{587eeb6a-7336-4ebd-a4f2-91c948de622c}' = s 'winedmo Scheme Handler'
++                    }
++                    'rtspsh:'
++                    {
++                        val '{587eeb6a-7336-4ebd-a4f2-91c948de622c}' = s 'winedmo Scheme Handler'
++                    }
+                 }
+             }
+         }
+-- 
+2.55.0
+

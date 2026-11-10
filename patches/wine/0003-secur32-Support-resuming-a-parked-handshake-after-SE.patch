@@ -1,0 +1,785 @@
+From d87880ed239f9bf79076b7d23377a1993e8f7d45 Mon Sep 17 00:00:00 2001
+From: Vulps22 <ajmcallister5@gmail.com>
+Date: Wed, 19 Aug 2026 03:24:36 +0100
+Subject: [PATCH 3/4] secur32: Support resuming a parked handshake after
+ SEC_I_INCOMPLETE_CREDENTIALS.
+
+GnuTLS's gnutls_handshake() runs synchronously to completion in one
+call, with no way to pause mid-handshake and resume once new
+credentials arrive. Real Windows SChannel's SEC_I_INCOMPLETE_CREDENTIALS
+retry contract requires exactly that: the app gets told to reacquire
+credentials and retry with the same context handle.
+
+Bridges the two by running the handshake on a worker thread. When
+GnuTLS's certificate-retrieve callback (cert_retrieve_cb) is invoked
+with no certificate available yet, the worker parks there instead of
+letting GnuTLS send an empty Certificate and complete the handshake.
+schan_update_session_creds() wakes it once schannel.c's
+establish_context() supplies a real credential via the documented
+retry path (a new phCredential on an existing phContext).
+
+Two more things this needed:
+
+- The retry call's input token is an empty placeholder (SSPI docs:
+  "call again like the first time, without any input"), which
+  establish_context() would otherwise treat as an incomplete network
+  read and reject before ever reaching the handshake call.
+
+- Unconsumed bytes of the server's TLS flight at the moment the
+  handshake parks (in practice the trailing ServerHelloDone record)
+  live in a SecBufferDesc that doesn't outlive the call that parked
+  us. They're copied out and drained by pull_adapter() on resume, or
+  the resumed handshake reads nothing, gets EAGAIN, and both ends
+  wait for each other.
+
+schan_create_session() only wires this up for a client session that
+starts out with no certificate at all; every other session is
+unaffected.
+---
+ dlls/secur32/schannel.c        |  78 ++++---
+ dlls/secur32/schannel_gnutls.c | 385 +++++++++++++++++++++++++++++----
+ dlls/secur32/secur32_priv.h    |   7 +
+ 3 files changed, 403 insertions(+), 67 deletions(-)
+
+diff --git a/dlls/secur32/schannel.c b/dlls/secur32/schannel.c
+index 05c1500..8ad7320 100644
+--- a/dlls/secur32/schannel.c
++++ b/dlls/secur32/schannel.c
+@@ -904,6 +904,7 @@ static SECURITY_STATUS establish_context(
+     int idx, i;
+     ULONG input_offset = 0, output_offset = 0;
+     SecBufferDesc input_desc, output_desc;
++    BOOL retry_with_new_creds = FALSE;
+ 
+     if (ptsTimeStamp)
+     {
+@@ -1016,50 +1017,69 @@ static SECURITY_STATUS establish_context(
+         unsigned char *ptr;
+ 
+         if (phContext && !(ctx = schan_get_object(phContext->dwLower, SCHAN_HANDLE_CTX))) return SEC_E_INVALID_HANDLE;
+-        if (!pInput && !ctx->control_token && !is_dtls_context(ctx)) return SEC_E_INCOMPLETE_MESSAGE;
+ 
+-        if (!ctx->control_token && pInput)
++        if (!bIsServer && phContext && phCredential)
+         {
+-            if (!validate_input_buffers(pInput)) return SEC_E_INVALID_TOKEN;
+-            if ((idx = schan_find_sec_buffer_idx(pInput, 0, SECBUFFER_TOKEN)) == -1) return SEC_E_INCOMPLETE_MESSAGE;
++            struct schan_credentials *new_cred = schan_get_object(phCredential->dwLower, SCHAN_HANDLE_CRED);
++            if (new_cred)
++            {
++                struct update_session_creds_params params = { ctx->session, new_cred->credentials };
++                GNUTLS_CALL( update_session_creds, &params );
++                retry_with_new_creds = TRUE;
++            }
++        }
+ 
+-            buffer = &pInput->pBuffers[idx];
+-            ptr = buffer->pvBuffer;
++        if (!pInput && !ctx->control_token && !is_dtls_context(ctx) && !retry_with_new_creds) return SEC_E_INCOMPLETE_MESSAGE;
+ 
+-            if (buffer->cbBuffer < ctx->header_size)
++        if (!ctx->control_token && pInput)
++        {
++            if (!validate_input_buffers(pInput)) return SEC_E_INVALID_TOKEN;
++            idx = schan_find_sec_buffer_idx(pInput, 0, SECBUFFER_TOKEN);
++            if (idx == -1)
++            {
++                if (!retry_with_new_creds) return SEC_E_INCOMPLETE_MESSAGE;
++            }
++            else if ((buffer = &pInput->pBuffers[idx])->cbBuffer < ctx->header_size && retry_with_new_creds)
++            {
++            }
++            else if (buffer->cbBuffer < ctx->header_size)
+             {
+                 TRACE("Expected at least %Iu bytes, but buffer only contains %lu bytes.\n",
+                       ctx->header_size, buffer->cbBuffer);
+                 fill_missing_sec_buffer(pInput, ctx->header_size - buffer->cbBuffer);
+                 return SEC_E_INCOMPLETE_MESSAGE;
+             }
+-
+-            if (!is_dtls_context(ctx) && !is_tls_record_header(ptr))
++            else
+             {
+-                WARN("Invalid TLS record header: %02x %02x %02x %02x %02x.\n",
+-                     ptr[0], ptr[1], ptr[2], ptr[3], ptr[4]);
+-                pOutput->pBuffers[idx].cbBuffer = 0;
+-                return SEC_E_INVALID_TOKEN;
+-            }
++                ptr = buffer->pvBuffer;
++
++                if (!is_dtls_context(ctx) && !is_tls_record_header(ptr))
++                {
++                    WARN("Invalid TLS record header: %02x %02x %02x %02x %02x.\n",
++                         ptr[0], ptr[1], ptr[2], ptr[3], ptr[4]);
++                    pOutput->pBuffers[idx].cbBuffer = 0;
++                    return SEC_E_INVALID_TOKEN;
++                }
+ 
+-            while (buffer->cbBuffer >= expected_size + ctx->header_size)
+-            {
+-                record_size = ctx->header_size + read_record_size(ptr, ctx->header_size);
++                while (buffer->cbBuffer >= expected_size + ctx->header_size)
++                {
++                    record_size = ctx->header_size + read_record_size(ptr, ctx->header_size);
+ 
+-                if (buffer->cbBuffer < expected_size + record_size) break;
+-                expected_size += record_size;
+-                ptr += record_size;
+-            }
++                    if (buffer->cbBuffer < expected_size + record_size) break;
++                    expected_size += record_size;
++                    ptr += record_size;
++                }
+ 
+-            if (!expected_size)
+-            {
+-                TRACE("Expected at least %Iu bytes, but buffer only contains %lu bytes.\n",
+-                      max(ctx->header_size, record_size), buffer->cbBuffer);
+-                fill_missing_sec_buffer(pInput, record_size - buffer->cbBuffer);
+-                return SEC_E_INCOMPLETE_MESSAGE;
+-            }
++                if (!expected_size)
++                {
++                    TRACE("Expected at least %Iu bytes, but buffer only contains %lu bytes.\n",
++                          max(ctx->header_size, record_size), buffer->cbBuffer);
++                    fill_missing_sec_buffer(pInput, record_size - buffer->cbBuffer);
++                    return SEC_E_INCOMPLETE_MESSAGE;
++                }
+ 
+-            TRACE("Using expected_size %Iu.\n", expected_size);
++                TRACE("Using expected_size %Iu.\n", expected_size);
++            }
+         }
+ 
+         if (phNewContext && phContext) *phNewContext = *phContext;
+diff --git a/dlls/secur32/schannel_gnutls.c b/dlls/secur32/schannel_gnutls.c
+index 17e468c..a17ead3 100644
+--- a/dlls/secur32/schannel_gnutls.c
++++ b/dlls/secur32/schannel_gnutls.c
+@@ -32,6 +32,7 @@
+ #include <errno.h>
+ #include <sys/types.h>
+ #include <dlfcn.h>
++#include <pthread.h>
+ #ifdef SONAME_LIBGNUTLS
+ #include <gnutls/gnutls.h>
+ #include <gnutls/crypto.h>
+@@ -56,6 +57,19 @@ WINE_DECLARE_DEBUG_CHANNEL(winediag);
+ 
+ static const char *system_priority_file;
+ 
++/* Set only on async_handshake_thread(); that thread has no Wine TEB, so TRACE/WARN/etc would segfault on it. */
++static __thread BOOL on_async_worker_thread;
++
++/* No-op on the worker thread instead of segfaulting; see on_async_worker_thread above. */
++#undef TRACE
++#define TRACE(...) do { if (!on_async_worker_thread) WINE_TRACE(__VA_ARGS__); } while(0)
++#undef WARN
++#define WARN(...) do { if (!on_async_worker_thread) WINE_WARN(__VA_ARGS__); } while(0)
++#undef FIXME
++#define FIXME(...) do { if (!on_async_worker_thread) WINE_FIXME(__VA_ARGS__); } while(0)
++#undef ERR
++#define ERR(...) do { if (!on_async_worker_thread) WINE_ERR(__VA_ARGS__); } while(0)
++
+ /* Not present in gnutls version < 2.9.10. */
+ static int (*pgnutls_cipher_get_block_size)(gnutls_cipher_algorithm_t);
+ 
+@@ -91,6 +105,7 @@ MAKE_FUNCPTR(gnutls_certificate_free_credentials);
+ MAKE_FUNCPTR(gnutls_certificate_get_ours);
+ MAKE_FUNCPTR(gnutls_certificate_get_peers);
+ MAKE_FUNCPTR(gnutls_certificate_server_set_request);
++MAKE_FUNCPTR(gnutls_certificate_set_retrieve_function2);
+ MAKE_FUNCPTR(gnutls_certificate_set_x509_key);
+ MAKE_FUNCPTR(gnutls_cipher_get);
+ MAKE_FUNCPTR(gnutls_cipher_get_key_size);
+@@ -105,10 +120,13 @@ MAKE_FUNCPTR(gnutls_init);
+ MAKE_FUNCPTR(gnutls_kx_get);
+ MAKE_FUNCPTR(gnutls_mac_get);
+ MAKE_FUNCPTR(gnutls_mac_get_key_size);
++MAKE_FUNCPTR(gnutls_pcert_deinit);
++MAKE_FUNCPTR(gnutls_pcert_import_x509);
+ MAKE_FUNCPTR(gnutls_perror);
+ MAKE_FUNCPTR(gnutls_protocol_get_version);
+ MAKE_FUNCPTR(gnutls_priority_set_direct);
+ MAKE_FUNCPTR(gnutls_privkey_deinit);
++MAKE_FUNCPTR(gnutls_privkey_import_x509);
+ MAKE_FUNCPTR(gnutls_privkey_init);
+ MAKE_FUNCPTR(gnutls_record_get_max_size);
+ MAKE_FUNCPTR(gnutls_record_recv);
+@@ -154,9 +172,17 @@ static inline gnutls_session_t session_from_handle(UINT64 handle)
+    return (gnutls_session_t)(ULONG_PTR)handle;
+ }
+ 
+-static inline gnutls_certificate_credentials_t certificate_creds_from_handle(UINT64 handle)
++struct schan_cert_creds
++{
++    gnutls_certificate_credentials_t gnutls_creds;
++    gnutls_pcert_st pcert;
++    gnutls_privkey_t privkey;
++    BOOL has_cert;
++};
++
++static inline struct schan_cert_creds *cert_creds_from_handle(UINT64 handle)
+ {
+-    return (gnutls_certificate_credentials_t)(ULONG_PTR)handle;
++    return (struct schan_cert_creds *)(ULONG_PTR)handle;
+ }
+ 
+ struct schan_buffers
+@@ -167,11 +193,32 @@ struct schan_buffers
+     int current_buffer_idx;
+ };
+ 
++enum schan_async_state
++{
++    ASYNC_IDLE,
++    ASYNC_RUNNING,
++    ASYNC_PARKED,
++    ASYNC_DONE,
++};
++
+ struct schan_transport
+ {
+     gnutls_session_t session;
+     struct schan_buffers in;
+     struct schan_buffers out;
++
++    BOOL async_capable;
++    pthread_t async_thread;
++    pthread_mutex_t async_mutex;
++    pthread_cond_t async_cond;
++    enum schan_async_state async_state;
++    struct schan_cert_creds *async_new_creds;
++    BOOL async_abort;
++    int async_result;
++
++    BYTE *parked_in;
++    SIZE_T parked_in_size;
++    SIZE_T parked_in_offset;
+ };
+ 
+ static int compat_cipher_get_block_size(gnutls_cipher_algorithm_t cipher)
+@@ -325,6 +372,23 @@ static ssize_t pull_adapter(gnutls_transport_ptr_t transport, void *buff, size_t
+ 
+     TRACE("Pull %lu bytes\n", len);
+ 
++    if (t->parked_in && t->parked_in_offset < t->parked_in_size)
++    {
++        SIZE_T avail = t->parked_in_size - t->parked_in_offset;
++
++        if (len > avail) len = avail;
++        memcpy(buff, t->parked_in + t->parked_in_offset, len);
++        t->parked_in_offset += len;
++        if (t->parked_in_offset == t->parked_in_size)
++        {
++            free(t->parked_in);
++            t->parked_in = NULL;
++            t->parked_in_size = t->parked_in_offset = 0;
++        }
++        TRACE("Read %lu bytes (parked)\n", len);
++        return len;
++    }
++
+     b = get_buffer(&t->in, &len);
+     if (!b)
+     {
+@@ -494,12 +558,17 @@ static NTSTATUS set_priority(schan_credentials *cred, gnutls_session_t session)
+     return STATUS_SUCCESS;
+ }
+ 
++static int cert_retrieve_cb(gnutls_session_t session, const gnutls_datum_t *req_ca_rdn, int nreqs,
++                             const gnutls_pk_algorithm_t *pk_algos, int pk_algos_length,
++                             gnutls_pcert_st **pcerts, unsigned int *pcert_length, gnutls_privkey_t *privkey);
++
+ static NTSTATUS schan_create_session( void *args )
+ {
+     const struct create_session_params *params = args;
+     schan_credentials *cred = params->cred;
+     unsigned int flags = (cred->credential_use == SECPKG_CRED_INBOUND) ? GNUTLS_SERVER : GNUTLS_CLIENT;
+     struct schan_transport *transport;
++    struct schan_cert_creds *cc;
+     gnutls_session_t s;
+     NTSTATUS status;
+     int err;
+@@ -532,7 +601,8 @@ static NTSTATUS schan_create_session( void *args )
+         return status;
+     }
+ 
+-    err = pgnutls_credentials_set(s, GNUTLS_CRD_CERTIFICATE, certificate_creds_from_handle(cred->credentials));
++    cc = cert_creds_from_handle(cred->credentials);
++    err = pgnutls_credentials_set(s, GNUTLS_CRD_CERTIFICATE, cc->gnutls_creds);
+     if (err != GNUTLS_E_SUCCESS)
+     {
+         pgnutls_perror(err);
+@@ -545,16 +615,78 @@ static NTSTATUS schan_create_session( void *args )
+     if (flags & GNUTLS_DATAGRAM) pgnutls_transport_set_pull_timeout_function(s, pull_timeout);
+     pgnutls_transport_set_push_function(s, push_adapter);
+     pgnutls_transport_set_ptr(s, (gnutls_transport_ptr_t)transport);
++
++    if (flags == GNUTLS_CLIENT && !cc->has_cert)
++    {
++        transport->async_capable = TRUE;
++        pthread_mutex_init(&transport->async_mutex, NULL);
++        pthread_cond_init(&transport->async_cond, NULL);
++        pgnutls_certificate_set_retrieve_function2(cc->gnutls_creds, cert_retrieve_cb);
++    }
++
+     *params->session = (ULONG_PTR)s;
+ 
+     return STATUS_SUCCESS;
+ }
+ 
++static NTSTATUS schan_update_session_creds( void *args )
++{
++    const struct update_session_creds_params *params = args;
++    gnutls_session_t s = session_from_handle(params->session);
++    struct schan_transport *t = (struct schan_transport *)pgnutls_transport_get_ptr(s);
++    struct schan_cert_creds *cc = cert_creds_from_handle(params->credentials);
++    int err;
++
++    if (!cc->has_cert)
++    {
++        TRACE("Supplied credential carries no certificate; leaving the session's "
++              "credentials alone.\n");
++        return STATUS_SUCCESS;
++    }
++
++    err = pgnutls_credentials_set(s, GNUTLS_CRD_CERTIFICATE, cc->gnutls_creds);
++    if (err != GNUTLS_E_SUCCESS)
++    {
++        pgnutls_perror(err);
++        return STATUS_INTERNAL_ERROR;
++    }
++
++    if (t->async_capable)
++    {
++        pthread_mutex_lock(&t->async_mutex);
++        t->async_new_creds = cc;
++        pthread_mutex_unlock(&t->async_mutex);
++    }
++
++    return STATUS_SUCCESS;
++}
++
+ static NTSTATUS schan_dispose_session( void *args )
+ {
+     const struct session_params *params = args;
+     gnutls_session_t s = session_from_handle(params->session);
+     struct schan_transport *t = (struct schan_transport *)pgnutls_transport_get_ptr(s);
++
++    if (t->async_capable)
++    {
++        pthread_mutex_lock(&t->async_mutex);
++        if (t->async_state == ASYNC_PARKED)
++        {
++            t->in.desc = NULL;
++            t->out.desc = NULL;
++            t->async_abort = TRUE;
++            pthread_cond_broadcast(&t->async_cond);
++            while (t->async_state != ASYNC_DONE)
++                pthread_cond_wait(&t->async_cond, &t->async_mutex);
++        }
++        pthread_mutex_unlock(&t->async_mutex);
++        if (t->async_state == ASYNC_DONE) pthread_join(t->async_thread, NULL);
++        pthread_mutex_destroy(&t->async_mutex);
++        pthread_cond_destroy(&t->async_cond);
++    }
++
++    free(t->parked_in);
++
+     pgnutls_transport_set_ptr(s, NULL);
+     pgnutls_deinit(s);
+     free(t);
+@@ -637,20 +769,80 @@ static NTSTATUS send_alert(gnutls_session_t session, unsigned int type, unsigned
+     return SEC_E_OK;
+ }
+ 
++static int cert_retrieve_cb(gnutls_session_t session, const gnutls_datum_t *req_ca_rdn, int nreqs,
++                             const gnutls_pk_algorithm_t *pk_algos, int pk_algos_length,
++                             gnutls_pcert_st **pcerts, unsigned int *pcert_length, gnutls_privkey_t *privkey)
++{
++    struct schan_transport *t = (struct schan_transport *)pgnutls_transport_get_ptr(session);
++    struct schan_cert_creds *cc;
++
++    pthread_mutex_lock(&t->async_mutex);
++
++    if (!t->async_new_creds && !t->async_abort)
++    {
++        TRACE("Server requested a client certificate but none is available yet; "
++              "parking the handshake until the app retries with one.\n");
++
++        if (!t->parked_in)
++        {
++            SIZE_T total = 0, chunk;
++            char *src;
++
++            for (;;)
++            {
++                BYTE *grown;
++
++                chunk = ~(SIZE_T)0;
++                if (!(src = get_buffer(&t->in, &chunk)) || !chunk) break;
++                if (!(grown = realloc(t->parked_in, total + chunk))) break;
++                t->parked_in = grown;
++                memcpy(t->parked_in + total, src, chunk);
++                total += chunk;
++                t->in.offset += chunk;
++            }
++            t->parked_in_size = total;
++            t->parked_in_offset = 0;
++            if (!total)
++            {
++                free(t->parked_in);
++                t->parked_in = NULL;
++            }
++        }
++
++        t->async_state = ASYNC_PARKED;
++        pthread_cond_broadcast(&t->async_cond);
++        do
++        {
++            pthread_cond_wait(&t->async_cond, &t->async_mutex);
++        } while (!t->async_new_creds && !t->async_abort);
++        TRACE("Resuming handshake with a certificate now available.\n");
++        t->async_state = ASYNC_RUNNING;
++    }
++
++    cc = t->async_abort ? NULL : t->async_new_creds;
++    pthread_mutex_unlock(&t->async_mutex);
++
++    if (!cc || !cc->has_cert)
++    {
++        *pcert_length = 0;
++        *privkey = NULL;
++        return 0;
++    }
++
++    *pcerts = &cc->pcert;
++    *pcert_length = 1;
++    *privkey = cc->privkey;
++    return 0;
++}
++
+ static NTSTATUS schan_set_server_cert_request( void *args )
+ {
+     const struct set_server_cert_request_params *params = args;
+     gnutls_session_t s = session_from_handle(params->session);
+-    /* Ask the client for a certificate, but don't fail the handshake
+-     * ourselves if it doesn't send one -- that's for the app's own
+-     * certificate validation callback to decide, same as when this is
+-     * requested (not required) via SChannel on real Windows. */
+     pgnutls_certificate_server_set_request( s, GNUTLS_CERT_REQUEST );
+     return STATUS_SUCCESS;
+ }
+ 
+-/* Calls pgnutls_handshake(), silently retrying in place for the one warning
+- * alert schan_handshake() has always treated as ignorable (GNUTLS_A_UNRECOGNIZED_NAME). */
+ static int do_gnutls_handshake_with_retry(gnutls_session_t s)
+ {
+     int err;
+@@ -672,28 +864,17 @@ static int do_gnutls_handshake_with_retry(gnutls_session_t s)
+     }
+ }
+ 
+-/* Turns a pgnutls_handshake()/do_gnutls_handshake_with_retry() result into the
+- * NTSTATUS schan_handshake() reports back to schannel.c. */
+ static NTSTATUS handshake_status_from_err(gnutls_session_t s, int err)
+ {
+     if (err == GNUTLS_E_SUCCESS)
+     {
+-        /* A client session may have completed the handshake without ever
+-         * presenting a certificate, either because the app didn't supply
+-         * one, or because it deliberately started anonymous (as e.g. .NET's
+-         * SslStream does by default) expecting to be told to retry with a
+-         * certificate if the server actually asks for one. Detect that case
+-         * here and surface it, instead of silently completing an anonymous
+-         * handshake the app never intended. */
++        int req_status = pgnutls_certificate_client_get_request_status(s);
++        const gnutls_datum_t *ours = pgnutls_certificate_get_ours(s);
++        if (req_status && !ours)
+         {
+-            int req_status = pgnutls_certificate_client_get_request_status(s);
+-            const gnutls_datum_t *ours = pgnutls_certificate_get_ours(s);
+-            if (req_status && !ours)
+-            {
+-                TRACE("Server requested a client certificate but none was sent; "
+-                      "reporting incomplete credentials.\n");
+-                return SEC_I_INCOMPLETE_CREDENTIALS;
+-            }
++            TRACE("Server requested a client certificate but none was sent; "
++                  "reporting incomplete credentials.\n");
++            return SEC_I_INCOMPLETE_CREDENTIALS;
+         }
+         TRACE("Handshake completed\n");
+         return SEC_E_OK;
+@@ -719,6 +900,72 @@ static NTSTATUS handshake_status_from_err(gnutls_session_t s, int err)
+     return SEC_E_INTERNAL_ERROR;
+ }
+ 
++static void *async_handshake_thread(void *arg)
++{
++    struct schan_transport *t = arg;
++    int err;
++
++    on_async_worker_thread = TRUE;
++    err = do_gnutls_handshake_with_retry(t->session);
++
++    pthread_mutex_lock(&t->async_mutex);
++    t->async_state = ASYNC_DONE;
++    t->async_result = err;
++    pthread_cond_broadcast(&t->async_cond);
++    pthread_mutex_unlock(&t->async_mutex);
++    return NULL;
++}
++
++static NTSTATUS schan_run_async_handshake( struct schan_transport *t, gnutls_session_t s )
++{
++    NTSTATUS status;
++    int err;
++
++    pthread_mutex_lock(&t->async_mutex);
++
++    if (t->async_state == ASYNC_IDLE)
++    {
++        t->async_state = ASYNC_RUNNING;
++        if (pthread_create(&t->async_thread, NULL, async_handshake_thread, t))
++        {
++            t->async_state = ASYNC_IDLE;
++            pthread_mutex_unlock(&t->async_mutex);
++            ERR("Failed to start handshake worker thread\n");
++            return SEC_E_INTERNAL_ERROR;
++        }
++    }
++    else
++    {
++        if (!t->async_new_creds)
++        {
++            TRACE("Retry has no certificate yet; leaving the handshake parked "
++                  "and asking again.\n");
++            pthread_mutex_unlock(&t->async_mutex);
++            return SEC_I_INCOMPLETE_CREDENTIALS;
++        }
++        /* Must be set before the broadcast, or the wait below misses the wakeup. */
++        t->async_state = ASYNC_RUNNING;
++        pthread_cond_broadcast(&t->async_cond);
++    }
++
++    while (t->async_state == ASYNC_RUNNING)
++        pthread_cond_wait(&t->async_cond, &t->async_mutex);
++
++    if (t->async_state == ASYNC_PARKED)
++    {
++        pthread_mutex_unlock(&t->async_mutex);
++        return SEC_I_INCOMPLETE_CREDENTIALS;
++    }
++
++    pthread_mutex_unlock(&t->async_mutex);
++    pthread_join(t->async_thread, NULL);
++    err = t->async_result;
++    t->async_state = ASYNC_IDLE;
++
++    status = handshake_status_from_err(s, err);
++    return status;
++}
++
+ static NTSTATUS schan_handshake( void *args )
+ {
+     const struct handshake_params *params = args;
+@@ -736,7 +983,10 @@ static NTSTATUS schan_handshake( void *args )
+         goto done;
+     }
+ 
+-    status = handshake_status_from_err(s, do_gnutls_handshake_with_retry(s));
++    if (t->async_capable)
++        status = schan_run_async_handshake(t, s);
++    else
++        status = handshake_status_from_err(s, do_gnutls_handshake_with_retry(s));
+ 
+ done:
+     *params->input_offset = t->in.offset;
+@@ -1445,55 +1695,108 @@ static gnutls_x509_crt_t get_x509_crt(const struct allocate_certificate_credenti
+ static NTSTATUS schan_allocate_certificate_credentials( void *args )
+ {
+     const struct allocate_certificate_credentials_params *params = args;
+-    gnutls_certificate_credentials_t creds;
++    struct schan_cert_creds *cc;
+     gnutls_x509_crt_t crt;
+     gnutls_x509_privkey_t key;
++    gnutls_privkey_t abstract_key;
+     int ret;
+ 
+-    ret = pgnutls_certificate_allocate_credentials(&creds);
++    if (!(cc = calloc(1, sizeof(*cc)))) return STATUS_INTERNAL_ERROR;
++
++    ret = pgnutls_certificate_allocate_credentials(&cc->gnutls_creds);
+     if (ret != GNUTLS_E_SUCCESS)
+     {
+         pgnutls_perror(ret);
++        free(cc);
+         return STATUS_INTERNAL_ERROR;
+     }
+ 
+     if (!params->cert_blob)
+     {
+-        params->c->credentials = (ULONG_PTR)creds;
++        params->c->credentials = (ULONG_PTR)cc;
+         return STATUS_SUCCESS;
+     }
+ 
+     if (!(crt = get_x509_crt(params)))
+     {
+-        pgnutls_certificate_free_credentials(creds);
++        pgnutls_certificate_free_credentials(cc->gnutls_creds);
++        free(cc);
+         return STATUS_INTERNAL_ERROR;
+     }
+ 
+     if (!(key = get_x509_key(params->key_size, params->key_blob)))
+     {
+         pgnutls_x509_crt_deinit(crt);
+-        pgnutls_certificate_free_credentials(creds);
++        pgnutls_certificate_free_credentials(cc->gnutls_creds);
++        free(cc);
+         return STATUS_INTERNAL_ERROR;
+     }
+ 
+-    ret = pgnutls_certificate_set_x509_key(creds, &crt, 1, key);
+-    pgnutls_x509_privkey_deinit(key);
+-    pgnutls_x509_crt_deinit(crt);
++    ret = pgnutls_certificate_set_x509_key(cc->gnutls_creds, &crt, 1, key);
+     if (ret != GNUTLS_E_SUCCESS)
+     {
+         pgnutls_perror(ret);
+-        pgnutls_certificate_free_credentials(creds);
++        pgnutls_x509_privkey_deinit(key);
++        pgnutls_x509_crt_deinit(crt);
++        pgnutls_certificate_free_credentials(cc->gnutls_creds);
++        free(cc);
+         return STATUS_INTERNAL_ERROR;
+     }
+ 
+-    params->c->credentials = (ULONG_PTR)creds;
++    if ((ret = pgnutls_pcert_import_x509(&cc->pcert, crt, 0)) != GNUTLS_E_SUCCESS)
++    {
++        pgnutls_perror(ret);
++        pgnutls_x509_privkey_deinit(key);
++        pgnutls_x509_crt_deinit(crt);
++        pgnutls_certificate_free_credentials(cc->gnutls_creds);
++        free(cc);
++        return STATUS_INTERNAL_ERROR;
++    }
++
++    if ((ret = pgnutls_privkey_init(&abstract_key)) != GNUTLS_E_SUCCESS)
++    {
++        pgnutls_perror(ret);
++        pgnutls_pcert_deinit(&cc->pcert);
++        pgnutls_x509_privkey_deinit(key);
++        pgnutls_x509_crt_deinit(crt);
++        pgnutls_certificate_free_credentials(cc->gnutls_creds);
++        free(cc);
++        return STATUS_INTERNAL_ERROR;
++    }
++
++    if ((ret = pgnutls_privkey_import_x509(abstract_key, key, GNUTLS_PRIVKEY_IMPORT_COPY)) != GNUTLS_E_SUCCESS)
++    {
++        pgnutls_perror(ret);
++        pgnutls_privkey_deinit(abstract_key);
++        pgnutls_pcert_deinit(&cc->pcert);
++        pgnutls_x509_privkey_deinit(key);
++        pgnutls_x509_crt_deinit(crt);
++        pgnutls_certificate_free_credentials(cc->gnutls_creds);
++        free(cc);
++        return STATUS_INTERNAL_ERROR;
++    }
++    cc->privkey = abstract_key;
++    cc->has_cert = TRUE;
++
++    pgnutls_x509_privkey_deinit(key);
++    pgnutls_x509_crt_deinit(crt);
++
++    params->c->credentials = (ULONG_PTR)cc;
+     return STATUS_SUCCESS;
+ }
+ 
+ static NTSTATUS schan_free_certificate_credentials( void *args )
+ {
+     const struct free_certificate_credentials_params *params = args;
+-    pgnutls_certificate_free_credentials(certificate_creds_from_handle(params->c->credentials));
++    struct schan_cert_creds *cc = cert_creds_from_handle(params->c->credentials);
++
++    if (cc->has_cert)
++    {
++        pgnutls_pcert_deinit(&cc->pcert);
++        pgnutls_privkey_deinit(cc->privkey);
++    }
++    pgnutls_certificate_free_credentials(cc->gnutls_creds);
++    free(cc);
+     return STATUS_SUCCESS;
+ }
+ 
+@@ -1539,6 +1842,7 @@ static NTSTATUS process_attach( void *args )
+     LOAD_FUNCPTR(gnutls_certificate_get_ours)
+     LOAD_FUNCPTR(gnutls_certificate_get_peers)
+     LOAD_FUNCPTR(gnutls_certificate_server_set_request)
++    LOAD_FUNCPTR(gnutls_certificate_set_retrieve_function2)
+     LOAD_FUNCPTR(gnutls_certificate_set_x509_key)
+     LOAD_FUNCPTR(gnutls_cipher_get)
+     LOAD_FUNCPTR(gnutls_cipher_get_key_size)
+@@ -1553,10 +1857,13 @@ static NTSTATUS process_attach( void *args )
+     LOAD_FUNCPTR(gnutls_kx_get)
+     LOAD_FUNCPTR(gnutls_mac_get)
+     LOAD_FUNCPTR(gnutls_mac_get_key_size)
++    LOAD_FUNCPTR(gnutls_pcert_deinit)
++    LOAD_FUNCPTR(gnutls_pcert_import_x509)
+     LOAD_FUNCPTR(gnutls_perror)
+     LOAD_FUNCPTR(gnutls_protocol_get_version)
+     LOAD_FUNCPTR(gnutls_priority_set_direct)
+     LOAD_FUNCPTR(gnutls_privkey_deinit)
++    LOAD_FUNCPTR(gnutls_privkey_import_x509)
+     LOAD_FUNCPTR(gnutls_privkey_init)
+     LOAD_FUNCPTR(gnutls_record_get_max_size);
+     LOAD_FUNCPTR(gnutls_record_recv);
+@@ -1679,6 +1986,7 @@ const unixlib_entry_t __wine_unix_call_funcs[] =
+     schan_set_session_target,
+     schan_set_dtls_timeouts,
+     schan_set_server_cert_request,
++    schan_update_session_creds,
+ };
+ 
+ C_ASSERT(ARRAYSIZE(__wine_unix_call_funcs) == unix_funcs_count);
+@@ -2015,6 +2323,7 @@ const unixlib_entry_t __wine_unix_call_wow64_funcs[] =
+     wow64_schan_set_session_target,
+     schan_set_dtls_timeouts,
+     schan_set_server_cert_request,
++    schan_update_session_creds,
+ };
+ 
+ C_ASSERT(ARRAYSIZE(__wine_unix_call_wow64_funcs) == unix_funcs_count);
+diff --git a/dlls/secur32/secur32_priv.h b/dlls/secur32/secur32_priv.h
+index bfd657b..e01be79 100644
+--- a/dlls/secur32/secur32_priv.h
++++ b/dlls/secur32/secur32_priv.h
+@@ -202,6 +202,12 @@ struct set_dtls_mtu_params
+     unsigned int mtu;
+ };
+ 
++struct update_session_creds_params
++{
++    schan_session session;
++    UINT64 credentials;
++};
++
+ struct set_session_target_params
+ {
+     schan_session session;
+@@ -245,6 +251,7 @@ enum schan_funcs
+     unix_set_session_target,
+     unix_set_dtls_timeouts,
+     unix_set_server_cert_request,
++    unix_update_session_creds,
+     unix_funcs_count,
+ };
+ 
+-- 
+2.55.0
+

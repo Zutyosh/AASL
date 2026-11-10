@@ -1,0 +1,269 @@
+From d2313cb7fbcf213bbbe425f3d03c99fedb0b798d Mon Sep 17 00:00:00 2001
+From: Vulps22 <ajmcallister5@gmail.com>
+Date: Wed, 19 Aug 2026 03:03:37 +0100
+Subject: [PATCH 2/4] secur32: Request a client certificate for
+ ASC_REQ_MUTUAL_AUTH and report SEC_I_INCOMPLETE_CREDENTIALS.
+
+Two related gaps in SChannel's client-certificate support:
+
+- The server side never asked for a client certificate at all, even
+  with ASC_REQ_MUTUAL_AUTH set, because AcceptSecurityContext never
+  called gnutls_certificate_server_set_request(). A new unixlib op,
+  schan_set_server_cert_request(), does this with GNUTLS_CERT_REQUEST
+  (requested, not required, matching Schannel's own documented
+  optional semantics for this flag) so it stays purely additive: an
+  app that doesn't validate client certificates behaves exactly as
+  before, since GnuTLS won't fail the handshake over a missing one.
+
+- The client side never reported SEC_I_INCOMPLETE_CREDENTIALS when a
+  server asked for a certificate and the client's credentials didn't
+  have one, even though Wine already defines that status. It would
+  silently finish an anonymous handshake instead, so an application
+  relying on the documented "start anonymous, get told to retry with a
+  certificate" pattern (e.g. .NET's SslStream) never found out it
+  needed to supply one. Detected in a new handshake_status_from_err(),
+  split out of schan_handshake()'s old inline retry loop so the same
+  completion-status logic can be reused by both the synchronous path
+  and (in a later change) an asynchronous one.
+---
+ dlls/secur32/schannel.c        |   6 ++
+ dlls/secur32/schannel_gnutls.c | 130 +++++++++++++++++++++++----------
+ dlls/secur32/secur32_priv.h    |   6 ++
+ 3 files changed, 102 insertions(+), 40 deletions(-)
+
+diff --git a/dlls/secur32/schannel.c b/dlls/secur32/schannel.c
+index e03efb5..05c1500 100644
+--- a/dlls/secur32/schannel.c
++++ b/dlls/secur32/schannel.c
+@@ -962,6 +962,12 @@ static SECURITY_STATUS establish_context(
+         else
+             ctx->header_size = HEADER_SIZE_TLS;
+ 
++        if (bIsServer && (fContextReq & ASC_REQ_MUTUAL_AUTH))
++        {
++            struct set_server_cert_request_params params = { ctx->session };
++            GNUTLS_CALL( set_server_cert_request, &params );
++        }
++
+         if (pszTargetName && *pszTargetName)
+         {
+             UINT len = WideCharToMultiByte( CP_UNIXCP, 0, pszTargetName, -1, NULL, 0, NULL, NULL );
+diff --git a/dlls/secur32/schannel_gnutls.c b/dlls/secur32/schannel_gnutls.c
+index b95d887..17e468c 100644
+--- a/dlls/secur32/schannel_gnutls.c
++++ b/dlls/secur32/schannel_gnutls.c
+@@ -86,8 +86,11 @@ MAKE_FUNCPTR(gnutls_alert_get);
+ MAKE_FUNCPTR(gnutls_alert_get_name);
+ MAKE_FUNCPTR(gnutls_alert_send);
+ MAKE_FUNCPTR(gnutls_certificate_allocate_credentials);
++MAKE_FUNCPTR(gnutls_certificate_client_get_request_status);
+ MAKE_FUNCPTR(gnutls_certificate_free_credentials);
++MAKE_FUNCPTR(gnutls_certificate_get_ours);
+ MAKE_FUNCPTR(gnutls_certificate_get_peers);
++MAKE_FUNCPTR(gnutls_certificate_server_set_request);
+ MAKE_FUNCPTR(gnutls_certificate_set_x509_key);
+ MAKE_FUNCPTR(gnutls_cipher_get);
+ MAKE_FUNCPTR(gnutls_cipher_get_key_size);
+@@ -634,65 +637,107 @@ static NTSTATUS send_alert(gnutls_session_t session, unsigned int type, unsigned
+     return SEC_E_OK;
+ }
+ 
+-static NTSTATUS schan_handshake( void *args )
++static NTSTATUS schan_set_server_cert_request( void *args )
+ {
+-    const struct handshake_params *params = args;
++    const struct set_server_cert_request_params *params = args;
+     gnutls_session_t s = session_from_handle(params->session);
+-    struct schan_transport *t = (struct schan_transport *)pgnutls_transport_get_ptr(s);
+-    NTSTATUS status;
+-    int err;
+-
+-    init_schan_buffers(&t->in, params->input);
+-    t->in.limit = params->input_size;
+-    init_schan_buffers(&t->out, params->output);
++    /* Ask the client for a certificate, but don't fail the handshake
++     * ourselves if it doesn't send one -- that's for the app's own
++     * certificate validation callback to decide, same as when this is
++     * requested (not required) via SChannel on real Windows. */
++    pgnutls_certificate_server_set_request( s, GNUTLS_CERT_REQUEST );
++    return STATUS_SUCCESS;
++}
+ 
+-    if (params->control_token)
+-    {
+-        status = send_alert(s, params->alert_type, params->alert_number);
+-        goto done;
+-    }
++/* Calls pgnutls_handshake(), silently retrying in place for the one warning
++ * alert schan_handshake() has always treated as ignorable (GNUTLS_A_UNRECOGNIZED_NAME). */
++static int do_gnutls_handshake_with_retry(gnutls_session_t s)
++{
++    int err;
+ 
+     while (1)
+     {
+         err = pgnutls_handshake(s);
+-        if (err == GNUTLS_E_SUCCESS)
+-        {
+-            TRACE("Handshake completed\n");
+-            status = SEC_E_OK;
+-        }
+-        else if (err == GNUTLS_E_AGAIN)
+-        {
+-            TRACE("Continue...\n");
+-            status = SEC_I_CONTINUE_NEEDED;
+-        }
+-        else if (err == GNUTLS_E_WARNING_ALERT_RECEIVED)
++        if (err == GNUTLS_E_WARNING_ALERT_RECEIVED)
+         {
+             gnutls_alert_description_t alert = pgnutls_alert_get(s);
+-
+-            WARN("WARNING ALERT: %d %s\n", alert, pgnutls_alert_get_name(alert));
+-
+             if (alert == GNUTLS_A_UNRECOGNIZED_NAME)
+             {
++                WARN("WARNING ALERT: %d %s\n", alert, pgnutls_alert_get_name(alert));
+                 TRACE("Ignoring\n");
+                 continue;
+             }
+-            else
+-                status = SEC_E_INTERNAL_ERROR;
+-        }
+-        else if (err == GNUTLS_E_FATAL_ALERT_RECEIVED)
+-        {
+-            gnutls_alert_description_t alert = pgnutls_alert_get(s);
+-            WARN("FATAL ALERT: %d %s\n", alert, pgnutls_alert_get_name(alert));
+-            status = SEC_E_INTERNAL_ERROR;
+         }
+-        else
++        return err;
++    }
++}
++
++/* Turns a pgnutls_handshake()/do_gnutls_handshake_with_retry() result into the
++ * NTSTATUS schan_handshake() reports back to schannel.c. */
++static NTSTATUS handshake_status_from_err(gnutls_session_t s, int err)
++{
++    if (err == GNUTLS_E_SUCCESS)
++    {
++        /* A client session may have completed the handshake without ever
++         * presenting a certificate, either because the app didn't supply
++         * one, or because it deliberately started anonymous (as e.g. .NET's
++         * SslStream does by default) expecting to be told to retry with a
++         * certificate if the server actually asks for one. Detect that case
++         * here and surface it, instead of silently completing an anonymous
++         * handshake the app never intended. */
+         {
+-            pgnutls_perror(err);
+-            status = SEC_E_INTERNAL_ERROR;
++            int req_status = pgnutls_certificate_client_get_request_status(s);
++            const gnutls_datum_t *ours = pgnutls_certificate_get_ours(s);
++            if (req_status && !ours)
++            {
++                TRACE("Server requested a client certificate but none was sent; "
++                      "reporting incomplete credentials.\n");
++                return SEC_I_INCOMPLETE_CREDENTIALS;
++            }
+         }
+-        break;
++        TRACE("Handshake completed\n");
++        return SEC_E_OK;
++    }
++    if (err == GNUTLS_E_AGAIN)
++    {
++        TRACE("Continue...\n");
++        return SEC_I_CONTINUE_NEEDED;
++    }
++    if (err == GNUTLS_E_WARNING_ALERT_RECEIVED)
++    {
++        gnutls_alert_description_t alert = pgnutls_alert_get(s);
++        WARN("WARNING ALERT: %d %s\n", alert, pgnutls_alert_get_name(alert));
++        return SEC_E_INTERNAL_ERROR;
++    }
++    if (err == GNUTLS_E_FATAL_ALERT_RECEIVED)
++    {
++        gnutls_alert_description_t alert = pgnutls_alert_get(s);
++        WARN("FATAL ALERT: %d %s\n", alert, pgnutls_alert_get_name(alert));
++        return SEC_E_INTERNAL_ERROR;
++    }
++    pgnutls_perror(err);
++    return SEC_E_INTERNAL_ERROR;
++}
++
++static NTSTATUS schan_handshake( void *args )
++{
++    const struct handshake_params *params = args;
++    gnutls_session_t s = session_from_handle(params->session);
++    struct schan_transport *t = (struct schan_transport *)pgnutls_transport_get_ptr(s);
++    NTSTATUS status;
++
++    init_schan_buffers(&t->in, params->input);
++    t->in.limit = params->input_size;
++    init_schan_buffers(&t->out, params->output);
++
++    if (params->control_token)
++    {
++        status = send_alert(s, params->alert_type, params->alert_number);
++        goto done;
+     }
+ 
++    status = handshake_status_from_err(s, do_gnutls_handshake_with_retry(s));
++
+ done:
+     *params->input_offset = t->in.offset;
+     *params->output_buffer_idx = t->out.current_buffer_idx;
+@@ -1489,8 +1534,11 @@ static NTSTATUS process_attach( void *args )
+     LOAD_FUNCPTR(gnutls_alert_get_name)
+     LOAD_FUNCPTR(gnutls_alert_send)
+     LOAD_FUNCPTR(gnutls_certificate_allocate_credentials)
++    LOAD_FUNCPTR(gnutls_certificate_client_get_request_status)
+     LOAD_FUNCPTR(gnutls_certificate_free_credentials)
++    LOAD_FUNCPTR(gnutls_certificate_get_ours)
+     LOAD_FUNCPTR(gnutls_certificate_get_peers)
++    LOAD_FUNCPTR(gnutls_certificate_server_set_request)
+     LOAD_FUNCPTR(gnutls_certificate_set_x509_key)
+     LOAD_FUNCPTR(gnutls_cipher_get)
+     LOAD_FUNCPTR(gnutls_cipher_get_key_size)
+@@ -1630,6 +1678,7 @@ const unixlib_entry_t __wine_unix_call_funcs[] =
+     schan_set_dtls_mtu,
+     schan_set_session_target,
+     schan_set_dtls_timeouts,
++    schan_set_server_cert_request,
+ };
+ 
+ C_ASSERT(ARRAYSIZE(__wine_unix_call_funcs) == unix_funcs_count);
+@@ -1965,6 +2014,7 @@ const unixlib_entry_t __wine_unix_call_wow64_funcs[] =
+     schan_set_dtls_mtu,
+     wow64_schan_set_session_target,
+     schan_set_dtls_timeouts,
++    schan_set_server_cert_request,
+ };
+ 
+ C_ASSERT(ARRAYSIZE(__wine_unix_call_wow64_funcs) == unix_funcs_count);
+diff --git a/dlls/secur32/secur32_priv.h b/dlls/secur32/secur32_priv.h
+index ff91905..bfd657b 100644
+--- a/dlls/secur32/secur32_priv.h
++++ b/dlls/secur32/secur32_priv.h
+@@ -208,6 +208,11 @@ struct set_session_target_params
+     const char *target;
+ };
+ 
++struct set_server_cert_request_params
++{
++    schan_session session;
++};
++
+ struct set_dtls_timeouts_params
+ {
+     schan_session session;
+@@ -239,6 +244,7 @@ enum schan_funcs
+     unix_set_dtls_mtu,
+     unix_set_session_target,
+     unix_set_dtls_timeouts,
++    unix_set_server_cert_request,
+     unix_funcs_count,
+ };
+ 
+-- 
+2.55.0
+

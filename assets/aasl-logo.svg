@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- AASL logo: an isometric cube in the spirit of Somnium Space's mark,
+       its top tiles lifting off like a launch, a play cut on the right face. -->
+  <defs>
+    <linearGradient id="left" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2a2e38"/><stop offset="1" stop-color="#121419"/>
+    </linearGradient>
+    <linearGradient id="right" x1="1" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1d2028"/><stop offset="1" stop-color="#0c0e12"/>
+    </linearGradient>
+    <linearGradient id="top" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3a3f4c"/><stop offset="1" stop-color="#22262f"/>
+    </linearGradient>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f4f2ee"/><stop offset="1" stop-color="#c9c6c0"/>
+    </linearGradient>
+    <linearGradient id="tileLift" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#e8a33d"/>
+    </linearGradient>
+    <linearGradient id="edgeL" gradientUnits="userSpaceOnUse" x1="126" y1="357" x2="256" y2="432">
+      <stop offset="0" stop-color="#2f8cff"/><stop offset="1" stop-color="#3ddc84"/>
+    </linearGradient>
+    <linearGradient id="edgeR" gradientUnits="userSpaceOnUse" x1="256" y1="432" x2="386" y2="357">
+      <stop offset="0" stop-color="#f5d33d"/><stop offset="1" stop-color="#ff4d4d"/>
+    </linearGradient>
+    <linearGradient id="edgeC" gradientUnits="userSpaceOnUse" x1="256" y1="282" x2="256" y2="432">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.2"/><stop offset="1" stop-color="#3ddc84"/>
+    </linearGradient>
+    <linearGradient id="play" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffd27a"/><stop offset="1" stop-color="#e8a33d"/>
+    </linearGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="5" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <g transform="translate(0,16)">
+  <polygon points="126.0,207.0 256.0,282.0 256.0,432.0 126.0,357.0" fill="url(#left)"/>
+  <polygon points="256.0,282.0 386.0,207.0 386.0,357.0 256.0,432.0" fill="url(#right)"/>
+  <polygon points="256.0,132.0 386.0,207.0 256.0,282.0 126.0,207.0" fill="url(#top)"/>
+  <polygon points="256.0,-13.0 290.7,7.0 256.0,27.0 221.3,7.0" fill="url(#tileLift)" opacity="0.25"/>
+  <polygon points="256.0,137.0 290.7,157.0 256.0,177.0 221.3,157.0" fill="#0b0d12" opacity="0.9"/>
+  <polygon points="212.7,67.0 247.3,87.0 212.7,107.0 178.0,87.0" fill="url(#tileLift)" opacity="0.45"/>
+  <polygon points="212.7,162.0 247.3,182.0 212.7,202.0 178.0,182.0" fill="#0b0d12" opacity="0.9"/>
+  <polygon points="169.3,147.0 204.0,167.0 169.3,187.0 134.7,167.0" fill="url(#tileLift)" opacity="0.85"/>
+  <polygon points="169.3,187.0 204.0,207.0 169.3,227.0 134.7,207.0" fill="#0b0d12" opacity="0.9"/>
+  <polygon points="299.3,102.0 334.0,122.0 299.3,142.0 264.7,122.0" fill="url(#tileLift)" opacity="0.7"/>
+  <polygon points="299.3,162.0 334.0,182.0 299.3,202.0 264.7,182.0" fill="#0b0d12" opacity="0.9"/>
+  <polygon points="256.0,187.0 290.7,207.0 256.0,227.0 221.3,207.0" fill="url(#tile)" opacity="1"/>
+  <polygon points="212.7,212.0 247.3,232.0 212.7,252.0 178.0,232.0" fill="url(#tile)" opacity="1"/>
+  <polygon points="342.7,157.0 377.3,177.0 342.7,197.0 308.0,177.0" fill="url(#tileLift)" opacity="0.9"/>
+  <polygon points="342.7,187.0 377.3,207.0 342.7,227.0 308.0,207.0" fill="#0b0d12" opacity="0.9"/>
+  <polygon points="299.3,212.0 334.0,232.0 299.3,252.0 264.7,232.0" fill="url(#tile)" opacity="1"/>
+  <polygon points="256.0,237.0 290.7,257.0 256.0,277.0 221.3,257.0" fill="url(#tile)" opacity="1"/>
+  <polygon points="300.2,301.5 300.2,373.5 349.6,309.0" fill="url(#play)" filter="url(#glow)"/>
+  <g filter="url(#glow)" stroke-linecap="round" fill="none" stroke-width="7">
+    <line x1="126" y1="357" x2="256" y2="432" stroke="url(#edgeL)"/>
+    <line x1="256" y1="432" x2="386" y2="357" stroke="url(#edgeR)"/>
+    <line x1="256" y1="282" x2="256" y2="432" stroke="url(#edgeC)"/>
+  </g>
+  </g>
+</svg>

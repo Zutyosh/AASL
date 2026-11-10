@@ -1,0 +1,24 @@
+# AASL catalog: which Proton builds are recommended and which patch
+# bundles exist for them. Fetched at run time from the main branch, so a
+# new bundle or recommendation does not need an AASL release. A copy is
+# embedded in the binary as the offline fallback.
+
+schema = 1
+
+# What a fresh install uses. It must have a verified bundle below.
+recommended_proton = "ge:GE-Proton11-5"
+
+# Somnilux's published build: TLS client-certificate fixes (secur32,
+# crypt32, rsaenh from Wine 11.15) and media fixes (winedmo, kernelbase
+# from GE-Proton11-5's Wine, plus ffmpeg with dav1d).
+[[bundle]]
+id = "somnilux-build-1"
+title = "Somnilux build 1"
+archive_format = 2
+url = "https://github.com/Vulps22/somnilux/releases/download/somnilux-binaries-build-1/somnilux-binaries.tar.gz"
+sha256 = "328bccf4c2864db800e82d02a8732480e2923a0fdfe7f265823cfd066e0645c6"
+series = ["tls", "media"]
+targets = [
+  { proton = "ge:GE-Proton11-5", status = "verified" },
+  { proton = "ge:GE-Proton11-*", status = "untested" },
+]

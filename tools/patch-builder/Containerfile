@@ -1,0 +1,15 @@
+# Toolchain for building AASL patch bundles: Wine (64-bit, MinGW PE side)
+# and ffmpeg with dav1d. Arch is used because its packages track the
+# versions Proton builds against closely.
+FROM docker.io/library/archlinux:base-devel
+
+RUN pacman -Syu --noconfirm --needed \
+        git curl tar xz python nasm mingw-w64-gcc autoconf bison flex perl \
+        gnutls dav1d bzip2 libxkbcommon vulkan-headers vulkan-icd-loader \
+        freetype2 fontconfig libunwind patch \
+    && pacman -Scc --noconfirm
+
+COPY build.sh /usr/local/bin/aasl-build-patches
+RUN chmod +x /usr/local/bin/aasl-build-patches
+WORKDIR /work
+ENTRYPOINT ["/usr/local/bin/aasl-build-patches"]

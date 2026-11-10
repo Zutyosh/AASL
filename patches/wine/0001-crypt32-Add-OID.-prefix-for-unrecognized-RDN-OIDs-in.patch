@@ -1,0 +1,59 @@
+From 844eccd5383364dd6b34a2c6b680bce4a72f1ab2 Mon Sep 17 00:00:00 2001
+From: Vulps22 <ajmcallister5@gmail.com>
+Date: Wed, 19 Aug 2026 02:46:24 +0100
+Subject: [PATCH] crypt32: Add "OID." prefix for unrecognized RDN OIDs in
+ CertNameToStrW.
+
+When CertNameToStrW (CERT_X500_NAME_STR mode) formats a certificate
+Relative Distinguished Name whose attribute OID has no CryptFindOIDInfo
+entry, it currently falls back to the bare dotted-decimal OID string
+as the attribute name (e.g. "2.5.4.15=..."). Native CertNameToStrA/W
+instead prefixes such OIDs with "OID." (e.g. "OID.2.5.4.15=..."), per
+Microsoft's documented format for unrecognized attribute types.
+
+This matters beyond cosmetics: applications that hash or otherwise
+derive values from a certificate's Subject/Issuer string (e.g. to key
+a symmetric cipher from their own signing certificate) get a different
+string, and therefore a different derived value, than they would on
+real Windows whenever the certificate contains an OID Wine's built-in
+OID table doesn't recognize. Add the missing prefix so unrecognized
+OIDs round-trip the same way native does.
+---
+ dlls/crypt32/str.c | 14 +++++++++++++-
+ 1 file changed, 13 insertions(+), 1 deletion(-)
+
+diff --git a/dlls/crypt32/str.c b/dlls/crypt32/str.c
+index 2a2f87f..1a30d33 100644
+--- a/dlls/crypt32/str.c
++++ b/dlls/crypt32/str.c
+@@ -376,6 +376,7 @@ DWORD cert_name_to_str_with_indent(DWORD dwCertEncodingType, DWORD indentLevel,
+             {
+                 LPCSTR prefixA = NULL;
+                 LPCWSTR prefixW = NULL;
++                char oidBuffer[256];
+ 
+                 if (psz && ret + 1 == csz) break;
+ 
+@@ -391,7 +392,18 @@ DWORD cert_name_to_str_with_indent(DWORD dwCertEncodingType, DWORD indentLevel,
+                     if (oidInfo)
+                         prefixW = oidInfo->pwszName;
+                     else
+-                        prefixA = rdn->rgRDNAttr[j].pszObjId;
++                    {
++                        static const char oid_prefix[] = "OID.";
++                        LPCSTR objId = rdn->rgRDNAttr[j].pszObjId;
++
++                        if (objId && strlen(objId) + sizeof(oid_prefix) <= sizeof(oidBuffer))
++                        {
++                            snprintf(oidBuffer, sizeof(oidBuffer), "%s%s", oid_prefix, objId);
++                            prefixA = oidBuffer;
++                        }
++                        else
++                            prefixA = objId;
++                    }
+                 }
+                 if (dwStrType & CERT_NAME_STR_CRLF_FLAG)
+                 {
+-- 
+2.55.0
+
