@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "aasl-agent"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aasl-components",
  "aasl-core",
@@ -19,7 +19,7 @@ dependencies = [
 
 [[package]]
 name = "aasl-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aasl-agent",
  "aasl-components",
@@ -36,7 +36,7 @@ dependencies = [
 
 [[package]]
 name = "aasl-components"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aasl-core",
  "flate2",
@@ -57,7 +57,7 @@ dependencies = [
 
 [[package]]
 name = "aasl-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -69,7 +69,7 @@ dependencies = [
 
 [[package]]
 name = "aasl-diag"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aasl-components",
  "aasl-core",
@@ -83,7 +83,7 @@ dependencies = [
 
 [[package]]
 name = "aasl-gui"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aasl-agent",
  "aasl-components",
@@ -102,7 +102,7 @@ dependencies = [
 
 [[package]]
 name = "aasl-install"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aasl-components",
  "aasl-core",
@@ -122,7 +122,7 @@ dependencies = [
 
 [[package]]
 name = "aasl-patches"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aasl-components",
  "aasl-core",
@@ -137,7 +137,7 @@ dependencies = [
 
 [[package]]
 name = "aasl-runner"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aasl-components",
  "aasl-core",
@@ -153,7 +153,7 @@ dependencies = [
 
 [[package]]
 name = "aasl-service"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aasl-components",
  "aasl-core",
@@ -173,7 +173,7 @@ dependencies = [
 
 [[package]]
 name = "aasl-system"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aasl-core",
  "serde",
@@ -183,7 +183,7 @@ dependencies = [
 
 [[package]]
 name = "aasl-update"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aasl-components",
  "aasl-core",

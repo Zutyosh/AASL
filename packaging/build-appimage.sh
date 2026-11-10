@@ -21,10 +21,12 @@ cat > "$appdir/AppRun" <<'EOF'
 #!/bin/sh
 here=$(dirname "$(readlink -f "$0")")
 export PATH="$here/usr/bin:$PATH"
-case "${1:-}" in
-    install|repair|uninstall|launch|stop|doctor|fix|logs|report|status|system|mcp|vr|proton|patch|--json|-h|--help|-V|--version) exec "$here/usr/bin/aasl" "$@" ;;
-    *) exec "$here/usr/bin/aasl-gui" "$@" ;;
-esac
+# Any argument means the command line (aasl --help lists them); none
+# opens the app.
+if [ "$#" -gt 0 ]; then
+    exec "$here/usr/bin/aasl" "$@"
+fi
+exec "$here/usr/bin/aasl-gui"
 EOF
 chmod +x "$appdir/AppRun"
 

@@ -1,6 +1,6 @@
 # Maintainer: AASL contributors
 pkgname=aasl
-pkgver=0.1.0
+pkgver=0.1.1
 pkgrel=1
 pkgdesc="Install, launch and troubleshoot Somnium Space on Linux"
 arch=('x86_64')
