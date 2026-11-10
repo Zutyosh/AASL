@@ -44,6 +44,8 @@ pub struct Ui {
     pub installed: State<Vec<InstalledView>>,
     pub releases: State<Vec<ReleaseView>>,
     pub provider: State<&'static str>,
+    pub update: State<Option<aasl_service::UpdateInfo>>,
+    pub restart_ready: State<bool>,
 }
 
 impl Ui {
@@ -69,6 +71,12 @@ impl Ui {
             }
             self.status.set(svc().status());
             self.installed.set(svc().proton_installed());
+        });
+    }
+
+    pub fn update_now(mut self) {
+        self.run(async { svc().update_apply().await }, move |_| {
+            self.restart_ready.set(true)
         });
     }
 
@@ -104,6 +112,8 @@ pub fn use_ui() -> Ui {
         installed: use_state(|| svc().proton_installed()),
         releases: use_state(Vec::new),
         provider: use_state(|| "ge"),
+        update: use_state(|| svc().update_cached()),
+        restart_ready: use_state(|| false),
     };
 
     use_future(move || async move {
@@ -135,6 +145,12 @@ pub fn use_ui() -> Ui {
             tokio::time::sleep(Duration::from_millis(1000)).await;
             ui.status.set(svc().status());
             ui.approvals.set(approvals::pending());
+            let cached = svc().update_cached();
+            if ui.update.peek().as_ref().map(|u| &u.available)
+                != cached.as_ref().map(|u| &u.available)
+            {
+                ui.update.set(cached);
+            }
             if *ui.section.read() == Section::Logs && *ui.screen.read() == Screen::Settings {
                 ui.logs.set(
                     svc()

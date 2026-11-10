@@ -19,6 +19,7 @@ aasl-runner = { path = "crates/aasl-runner" }
 aasl-diag = { path = "crates/aasl-diag" }
 aasl-service = { path = "crates/aasl-service" }
 aasl-agent = { path = "crates/aasl-agent" }
+aasl-update = { path = "crates/aasl-update" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "1"

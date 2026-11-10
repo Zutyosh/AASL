@@ -31,6 +31,7 @@ pub fn view(mut ui: Ui) -> impl IntoElement {
                             (!ui.approvals.read().is_empty())
                                 .then(|| chip(t("agents.pending"), Tone::Accent)),
                         )
+                        .maybe_child(update_badge(ui))
                         .child(
                             Button::new()
                                 .flat()
@@ -203,4 +204,41 @@ fn actions(mut ui: Ui, st: &Status) -> impl IntoElement {
                 ),
         ),
     )
+}
+
+/// Top-bar entry for AASL's own updates: install, then restart.
+fn update_badge(ui: Ui) -> Option<Element> {
+    if *ui.restart_ready.read() {
+        return Some(
+            Button::new()
+                .filled()
+                .on_press(|_| crate::restart())
+                .child(t("update.restart"))
+                .into_element(),
+        );
+    }
+    let info = ui.update.read().clone()?;
+    let rel = info.available?;
+    let text = format!("{} {}", t("update.available"), rel.version);
+    Some(if info.can_apply {
+        rect()
+            .horizontal()
+            .spacing(space::S)
+            .cross_align(Alignment::Center)
+            .child(chip(text, Tone::Accent))
+            .child(
+                Button::new()
+                    .on_press(move |_| ui.update_now())
+                    .child(t("update.install")),
+            )
+            .into_element()
+    } else {
+        rect()
+            .horizontal()
+            .spacing(space::S)
+            .cross_align(Alignment::Center)
+            .child(chip(text, Tone::Accent))
+            .child(crate::widgets::muted(t("update.package")))
+            .into_element()
+    })
 }

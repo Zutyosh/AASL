@@ -35,6 +35,10 @@ pub struct Config {
     /// Extra environment for every launch, applied last.
     pub env: BTreeMap<String, String>,
     pub locale: Option<String>,
+    /// Look for a newer AASL at start-up.
+    pub check_updates: bool,
+    /// `stable` or `beta` (pre-releases too).
+    pub update_channel: String,
 }
 
 impl Default for Config {
@@ -50,6 +54,8 @@ impl Default for Config {
             openxr_env: None,
             env: BTreeMap::new(),
             locale: None,
+            check_updates: true,
+            update_channel: "stable".into(),
         }
     }
 }

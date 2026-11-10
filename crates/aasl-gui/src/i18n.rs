@@ -41,6 +41,28 @@ pub fn step(id: &str) -> String {
 }
 
 const TABLE: &[(&str, &str, &str)] = &[
+    ("update.available", "Update", "Mise à jour"),
+    ("update.install", "Install", "Installer"),
+    ("update.restart", "Restart AASL", "Redémarrer AASL"),
+    (
+        "update.package",
+        "Update through your package manager",
+        "Mettez à jour via votre gestionnaire de paquets",
+    ),
+    ("prefs.updates", "Updates", "Mises à jour"),
+    ("prefs.updates.version", "Version", "Version"),
+    ("prefs.updates.check", "Check now", "Vérifier"),
+    ("prefs.updates.uptodate", "Up to date", "À jour"),
+    (
+        "prefs.updates.auto",
+        "Check for updates at start-up",
+        "Vérifier les mises à jour au démarrage",
+    ),
+    (
+        "prefs.updates.beta",
+        "Include beta versions",
+        "Inclure les versions bêta",
+    ),
     (
         "app.tagline",
         "Somnium Space on Linux",

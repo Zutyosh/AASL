@@ -173,6 +173,20 @@ const TOOLS: &[ToolDef] = &[
         read_only: false,
         destructive: true,
     },
+    ToolDef {
+        name: "update_check",
+        description: "Whether a newer AASL release exists on GitHub, the current version, and how this copy was installed (AppImage, portable, package).",
+        schema: no_args,
+        read_only: true,
+        destructive: false,
+    },
+    ToolDef {
+        name: "update_apply",
+        description: "Download, verify and install the newer AASL over this copy. Takes effect after a restart. Needs the user's approval.",
+        schema: || json!({"type": "object", "properties": {"confirm": {"type": "boolean"}}}),
+        read_only: false,
+        destructive: true,
+    },
 ];
 
 const RESOURCES: &[(&str, &str, &str)] = &[
@@ -362,6 +376,13 @@ impl Server {
                 s.stop().await.map(|n| json!({"stopped": n})).map_err(|e| e.to_string())
             }
             "export_report" => serde_json::from_str(&s.report().await).map_err(|e| e.to_string()),
+            "update_check" => s.update_check().await.map_err(|e| e.to_string()).and_then(|i| to(serde_json::to_value(i))),
+            "update_apply" => {
+                if !self.approved("An agent wants to update AASL itself.".into(), args).await {
+                    return Err(NOT_APPROVED.into());
+                }
+                s.update_apply().await.map_err(|e| e.to_string()).and_then(|a| to(serde_json::to_value(a)))
+            }
             "vr_status" => to(serde_json::to_value(s.vr_status())),
             "proton_installed" => to(serde_json::to_value(s.proton_installed())),
             "proton_available" => {
@@ -536,6 +557,33 @@ mod tests {
         let s = s.with_confirm(Arc::new(|_| Box::pin(async { true })));
         let r = call(&s, "tools/call", json!({"name": "stop", "arguments": {}})).await;
         assert_eq!(r["result"]["structuredContent"]["stopped"], 0);
+    }
+
+    #[tokio::test]
+    async fn self_update_needs_approval() {
+        let d = tempfile::tempdir().unwrap();
+        let s = server(d.path()).without_audit();
+        let list = call(&s, "tools/list", json!({})).await;
+        let names: Vec<&str> = list["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap())
+            .collect();
+        assert!(names.contains(&"update_check") && names.contains(&"update_apply"));
+        let r = call(
+            &s,
+            "tools/call",
+            json!({"name": "update_apply", "arguments": {}}),
+        )
+        .await;
+        assert_eq!(r["result"]["isError"], true);
+        assert!(
+            r["result"]["structuredContent"]["error"]
+                .as_str()
+                .unwrap()
+                .contains("not approved")
+        );
     }
 
     #[tokio::test]

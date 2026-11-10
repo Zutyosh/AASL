@@ -17,6 +17,7 @@ aasl-diag.workspace = true
 aasl-system.workspace = true
 aasl-components.workspace = true
 aasl-patches.workspace = true
+aasl-update.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 freya = "=0.5.1"

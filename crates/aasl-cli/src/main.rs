@@ -90,6 +90,15 @@ enum Cmd {
     Report,
     /// Show whether the VR stack is ready, and what is missing.
     Vr,
+    /// Update AASL itself from its GitHub releases.
+    SelfUpdate {
+        /// Only say whether an update exists.
+        #[arg(long)]
+        check: bool,
+        /// Switch to the beta channel (pre-releases included).
+        #[arg(long)]
+        beta: bool,
+    },
     /// Manage Proton builds (GE-Proton, Proton-CachyOS).
     Proton {
         #[command(subcommand)]
@@ -192,6 +201,37 @@ async fn run(cli: Cli) -> ExitCode {
             let ready = v.ready;
             let code = out.ok(&v, output::vr);
             if ready { code } else { ExitCode::from(2) }
+        }
+        Cmd::SelfUpdate { check, beta } => {
+            if beta {
+                let mut cfg = svc.config();
+                cfg.update_channel = "beta".into();
+                if let Err(e) = svc.set_config(cfg) {
+                    return out.error(&e);
+                }
+            }
+            let info = match svc.update_check().await {
+                Ok(i) => i,
+                Err(e) => return out.error(&e),
+            };
+            match (&info.available, check) {
+                (None, _) => out.ok(&info, |i| format!("AASL {} is up to date.", i.current)),
+                (Some(_), true) => out.ok(&info, |i| {
+                    let r = i.available.as_ref().expect("checked");
+                    let how = if i.can_apply {
+                        "Run `aasl self-update` to install it."
+                    } else {
+                        "Update it with your package manager."
+                    };
+                    format!(
+                        "AASL {} is available (you have {}). {how}\n{}",
+                        r.version, i.current, r.url
+                    )
+                }),
+                (Some(_), false) => out.result(svc.update_apply().await, |a| {
+                    format!("AASL {} installed. Restart AASL to use it.", a.version)
+                }),
+            }
         }
         Cmd::Proton { cmd } => commands::proton(&out, &svc, cmd).await,
         Cmd::Patch { cmd } => commands::patch(&out, &svc, cmd).await,

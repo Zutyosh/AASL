@@ -7,8 +7,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
 mod tools;
+mod update;
 
 pub use tools::{InstalledView, ReleaseView};
+pub use update::UpdateInfo;
 
 use aasl_components::{CpuLevel, Downloader, Sources};
 use aasl_core::exec::{Exec, TokioExec};
@@ -64,6 +66,7 @@ struct Inner {
     session: Mutex<Option<u32>>,
     cpu: CpuLevel,
     catalog: Mutex<Option<Catalog>>,
+    update: Mutex<Option<UpdateInfo>>,
 }
 
 #[derive(Clone)]
@@ -118,6 +121,7 @@ impl Builder {
                 session: Mutex::new(None),
                 cpu: CpuLevel::detect(),
                 catalog: Mutex::new(None),
+                update: Mutex::new(None),
             }),
         })
     }
@@ -435,6 +439,40 @@ mod tests {
             .log_file(false)
             .build()
             .unwrap()
+    }
+
+    #[tokio::test]
+    async fn update_check_reports_newer_release_and_install_kind() {
+        use wiremock::matchers::path;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let server = MockServer::start().await;
+        Mock::given(path("/repos/Zutyosh/AASL/releases"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(r#"[{"tag_name":"v99.0.0","prerelease":false,"assets":[]}]"#),
+            )
+            .mount(&server)
+            .await;
+        let d = tempfile::tempdir().unwrap();
+        let h = d.path().display().to_string();
+        let paths = Paths::resolve(|k| (k == "HOME").then(|| h.clone())).unwrap();
+        let s = Service::builder(paths)
+            .host(Arc::new(aasl_system::FakeHost::new()))
+            .sources(Sources {
+                github_api: server.uri(),
+                ..Sources::default()
+            })
+            .log_file(false)
+            .build()
+            .unwrap();
+        let info = s.update_check().await.unwrap();
+        assert_eq!(info.available.unwrap().tag, "v99.0.0");
+        assert_eq!(info.current, aasl_update::Version::current());
+        assert_eq!(
+            s.update_cached().unwrap().available.unwrap().tag,
+            "v99.0.0",
+            "result kept for the UI"
+        );
     }
 
     #[tokio::test]

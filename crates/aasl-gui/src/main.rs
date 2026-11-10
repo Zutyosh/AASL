@@ -16,6 +16,20 @@ use aasl_service::Service;
 use freya::prelude::*;
 
 static SERVICE: OnceLock<Service> = OnceLock::new();
+/// How we were started, so a restart runs the updated file.
+static LAUNCH_PATH: OnceLock<std::path::PathBuf> = OnceLock::new();
+
+/// Start a fresh AASL (the updated one) and exit this process.
+pub fn restart() {
+    let target = std::env::var_os("APPIMAGE")
+        .map(std::path::PathBuf::from)
+        .or_else(|| LAUNCH_PATH.get().cloned())
+        .unwrap_or_else(|| "aasl-gui".into());
+    match std::process::Command::new(&target).spawn() {
+        Ok(_) => std::process::exit(0),
+        Err(e) => eprintln!("aasl-gui: could not restart {}: {e}", target.display()),
+    }
+}
 
 pub fn svc() -> &'static Service {
     SERVICE.get().expect("service initialised in main")
@@ -41,9 +55,15 @@ fn main() {
             eprintln!("aasl-gui: agent socket unavailable: {e}");
         }
     });
+    let _ = LAUNCH_PATH.set(std::env::current_exe().unwrap_or_default());
     let warm = service.clone();
     rt.spawn(async move {
         warm.catalog(false).await;
+        if warm.config().check_updates
+            && let Err(e) = warm.update_check().await
+        {
+            eprintln!("aasl-gui: update check failed: {e}");
+        }
     });
     let _ = SERVICE.set(service);
     launch(

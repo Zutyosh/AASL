@@ -55,6 +55,17 @@ aasl mcp             # MCP server on stdio; attaches to the running app
 
 Add `aasl mcp` as an MCP server in your agent. It exposes status, VR readiness, logs, processes, diagnostics, Proton management and the patch tools (read a patch, plan and run a build, apply a bundle). Anything that changes your setup asks for approval in the app first, and every call is logged.
 
+## Updates
+
+AASL checks its GitHub releases at start-up (Settings > Updates turns this off or opts into betas). The AppImage replaces itself; a portable install in a folder you can write replaces its two binaries; a package (AUR, distro) only shows the notice. Every download is checked against the SHA-256 GitHub publishes, and the previous AppImage is kept as `.old`.
+
+```sh
+aasl self-update --check
+aasl self-update
+```
+
+Releases: bump the version in `Cargo.toml`, push a `vX.Y.Z` tag, and the **Release** workflow publishes the AppImage and the tarball.
+
 ## Building
 
 ```sh

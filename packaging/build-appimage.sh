@@ -28,5 +28,6 @@ esac
 EOF
 chmod +x "$appdir/AppRun"
 
-ARCH=x86_64 appimagetool "$appdir" "$out/AASL-x86_64.AppImage"
+rm -f "$out/AASL-x86_64.AppImage"
+ARCH=x86_64 appimagetool --no-appstream "$appdir" "$out/AASL-x86_64.AppImage"
 echo "$out/AASL-x86_64.AppImage"

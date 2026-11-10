@@ -99,9 +99,85 @@ fn general(mut ui: Ui) -> impl IntoElement {
         }
     });
     let busy = st.operation.is_some();
+    let mut auto = use_state(|| svc().config().check_updates);
+    let auto_setter = WritableSetter::new(auto, move |v: bool| {
+        let mut cfg = svc().config();
+        cfg.check_updates = v;
+        match svc().set_config(cfg) {
+            Ok(()) => auto.set(v),
+            Err(e) => ui.error.set(Some(e.to_string())),
+        }
+    });
+    let mut beta = use_state(|| svc().config().update_channel == "beta");
+    let beta_setter = WritableSetter::new(beta, move |v: bool| {
+        let mut cfg = svc().config();
+        cfg.update_channel = if v { "beta" } else { "stable" }.into();
+        match svc().set_config(cfg) {
+            Ok(()) => beta.set(v),
+            Err(e) => ui.error.set(Some(e.to_string())),
+        }
+    });
+    let current = aasl_update::Version::current().to_string();
+    let update_line = match ui.update.read().as_ref() {
+        Some(u) => match &u.available {
+            Some(r) => format!("{current} → {}", r.version),
+            None => format!("{current} · {}", t("prefs.updates.uptodate")),
+        },
+        None => current,
+    };
+    let can_install = ui
+        .update
+        .read()
+        .as_ref()
+        .is_some_and(|u| u.available.is_some() && u.can_apply);
+    let restart = *ui.restart_ready.read();
+    let version_action = if restart {
+        Button::new()
+            .filled()
+            .on_press(|_| crate::restart())
+            .child(t("update.restart"))
+            .into_element()
+    } else if can_install {
+        Button::new()
+            .filled()
+            .enabled(!busy)
+            .on_press(move |_| ui.update_now())
+            .child(t("update.install"))
+            .into_element()
+    } else {
+        Button::new()
+            .flat()
+            .on_press(move |_| {
+                ui.run(async { svc().update_check().await }, move |i| {
+                    ui.update.set(Some(i))
+                })
+            })
+            .child(t("prefs.updates.check"))
+            .into_element()
+    };
     rect()
         .spacing(space::XL)
         .child(title(t("prefs.general")))
+        .child(group(
+            t("prefs.updates"),
+            vec![
+                row(
+                    format!("AASL {}", t("prefs.updates.version")),
+                    Some(update_line),
+                    Some(version_action),
+                ),
+                row(
+                    t("prefs.updates.auto"),
+                    None,
+                    Some(Switch::new(auto_setter).into_element()),
+                ),
+                row(
+                    t("prefs.updates.beta"),
+                    None,
+                    Some(Switch::new(beta_setter).into_element()),
+                ),
+            ],
+        ))
         .child(group(
             t("prefs.general"),
             vec![

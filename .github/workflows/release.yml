@@ -1,0 +1,48 @@
+name: Release
+
+# Push a tag like v0.2.0 (or v0.3.0-beta.1 for a pre-release) to publish
+# the AppImage and the portable tarball. Running copies of AASL find the
+# release through the GitHub API and update themselves from these assets.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: System libraries
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev libgl1-mesa-dev clang file
+      - name: Tag matches the crate version
+        run: |
+          crate=$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"]=="aasl-cli"))')
+          [ "v$crate" = "${GITHUB_REF_NAME}" ] || { echo "tag ${GITHUB_REF_NAME} != Cargo version $crate"; exit 1; }
+      - run: cargo test --workspace --release
+      - name: appimagetool
+        run: |
+          mkdir -p "$HOME/bin"
+          curl -fsSL -o "$HOME/bin/appimagetool" https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x "$HOME/bin/appimagetool"
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+      - name: Build AppImage and tarball
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: |
+          ./packaging/build-appimage.sh
+          mkdir -p dist
+          cp target/appimage/AASL-x86_64.AppImage dist/
+          tar -czf dist/aasl-x86_64-linux.tar.gz -C target/release aasl aasl-gui
+          cd dist && for f in *; do sha256sum "$f" > "$f.sha256"; done
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          pre=""
+          case "${GITHUB_REF_NAME}" in *-*) pre="--prerelease" ;; esac
+          gh release create "${GITHUB_REF_NAME}" $pre --title "AASL ${GITHUB_REF_NAME#v}" --generate-notes dist/*

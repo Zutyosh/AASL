@@ -92,6 +92,7 @@ dependencies = [
  "aasl-patches",
  "aasl-service",
  "aasl-system",
+ "aasl-update",
  "freya",
  "freya-testing",
  "serde_json",
@@ -161,11 +162,13 @@ dependencies = [
  "aasl-patches",
  "aasl-runner",
  "aasl-system",
+ "aasl-update",
  "serde",
  "serde_json",
  "tempfile",
  "tokio",
  "tracing",
+ "wiremock",
 ]
 
 [[package]]
@@ -176,6 +179,23 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+]
+
+[[package]]
+name = "aasl-update"
+version = "0.1.0"
+dependencies = [
+ "aasl-components",
+ "aasl-core",
+ "flate2",
+ "hex",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tar",
+ "tempfile",
+ "tokio",
+ "wiremock",
 ]
 
 [[package]]
