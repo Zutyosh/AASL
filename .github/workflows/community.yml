@@ -1,0 +1,83 @@
+name: Community recipe
+
+# Turns a "Compatibility recipe" issue into a judged pull request. The
+# issue body is untrusted: it only ever reaches the shell through files and
+# environment variables, and aasl validates the recipe (declarative TOML,
+# ids restricted to [a-z0-9_-]) before anything uses its id. Nothing from
+# the submission is built or run here.
+on:
+  issues:
+    types: [opened, edited]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+# One run per issue at a time: an edit while judging restarts the verdict.
+concurrency:
+  group: community-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  judge:
+    # The form adds the label when it exists; the title is the fallback for
+    # a fresh repository where the label has not been created yet.
+    if: >-
+      github.event.issue.state == 'open' &&
+      (contains(github.event.issue.labels.*.name, 'recipe') || startsWith(github.event.issue.title, 'Recipe:'))
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build aasl
+        run: cargo build --release -p aasl-cli
+      - name: Read the form
+        env:
+          BODY: ${{ github.event.issue.body }}
+        run: python3 tools/community/read_form.py "$RUNNER_TEMP/sub"
+      - name: Judge
+        id: judge
+        env:
+          SUB: ${{ runner.temp }}/sub
+          AASL_PATCHES_DIR: ${{ github.workspace }}/patches
+          ISSUE: ${{ github.event.issue.number }}
+        run: bash tools/community/judge.sh ./target/release/aasl "$SUB" "$ISSUE" . | tee -a "$GITHUB_OUTPUT"
+      - name: Open the pull request
+        if: steps.judge.outputs.ok == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ID: ${{ steps.judge.outputs.id }}
+          CUSTOM: ${{ steps.judge.outputs.custom }}
+          ISSUE: ${{ github.event.issue.number }}
+        run: |
+          branch="community/$ID-issue$ISSUE"
+          git config user.name "aasl-bot"
+          git config user.email "aasl-bot@users.noreply.github.com"
+          git checkout -B "$branch"
+          git add "community/recipes/$ID"
+          git commit -m "community($ID): recipe and reports from #$ISSUE"
+          git push -f origin "$branch"
+          gh label create recipe --color 8b5cf6 --description "Community compatibility recipe" --force
+          gh label create custom-code --color d97706 --description "Brings its own Wine patches: needs a code review" --force
+          labels="recipe"
+          [ "$CUSTOM" = "true" ] && labels="recipe,custom-code"
+          { cat "$RUNNER_TEMP/sub/comment.md"; echo; echo "Closes #$ISSUE"; } > "$RUNNER_TEMP/sub/pr.md"
+          if gh pr view "$branch" >/dev/null 2>&1; then
+            gh pr edit "$branch" --body-file "$RUNNER_TEMP/sub/pr.md" --add-label "$labels"
+          else
+            gh pr create --head "$branch" --label "$labels" \
+              --title "community($ID): recipe and reports from #$ISSUE" \
+              --body-file "$RUNNER_TEMP/sub/pr.md"
+          fi
+          echo >> "$RUNNER_TEMP/sub/comment.md"
+          echo "Pull request: $(gh pr view "$branch" --json url -q .url). Merging it closes this issue." >> "$RUNNER_TEMP/sub/comment.md"
+      - name: Comment
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE: ${{ github.event.issue.number }}
+        run: |
+          [ -f "$RUNNER_TEMP/sub/comment.md" ] || echo "The bot could not read this submission; see the workflow log." > "$RUNNER_TEMP/sub/comment.md"
+          gh issue comment "$ISSUE" --body-file "$RUNNER_TEMP/sub/comment.md"

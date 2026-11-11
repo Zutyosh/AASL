@@ -1,0 +1,34 @@
+name: Community index
+
+# community/index.json is generated: rebuilt here whenever a recipe or a
+# report lands on main, so submissions never conflict on it.
+on:
+  push:
+    branches: [main]
+    paths: ["community/recipes/**", "patches/**", "crates/aasl-patches/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  index:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build aasl
+        run: cargo build --release -p aasl-cli
+      - name: Rebuild the index
+        env:
+          AASL_PATCHES_DIR: ${{ github.workspace }}/patches
+        run: ./target/release/aasl community index community --write
+      - name: Commit
+        run: |
+          git diff --quiet community/index.json && exit 0
+          git config user.name "aasl-bot"
+          git config user.email "aasl-bot@users.noreply.github.com"
+          git add community/index.json
+          git commit -m "community: rebuild the index"
+          git push

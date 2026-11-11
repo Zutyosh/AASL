@@ -22,7 +22,12 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
-      - run: bash -n tools/patch-builder/build.sh
+      - run: bash -n tools/patch-builder/build.sh && bash -n tools/community/judge.sh
+      - run: python3 -m py_compile tools/community/read_form.py
+      - name: Community recipes still check
+        env:
+          AASL_PATCHES_DIR: ${{ github.workspace }}/patches
+        run: cargo run -q --release -p aasl-cli -- community index community --strict
       - run: cargo build --release -p aasl-cli
       - uses: actions/upload-artifact@v4
         with:
