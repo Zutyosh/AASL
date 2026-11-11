@@ -71,6 +71,28 @@ aasl self-update --check
 aasl self-update
 ```
 
+## Uninstalling
+
+```sh
+aasl stop                       # end any running session first
+aasl uninstall                  # remove Proton, umu, downloads, install state and the menu entry
+aasl uninstall --remove-prefix  # same, plus the prefix: Somnium and its settings
+```
+
+`aasl uninstall` keeps the Wine prefix unless you pass `--remove-prefix`. It also keeps your settings, your own recipes, session reports, logs and the cache. To wipe those as well, delete AASL's four directories (the paths below follow `XDG_*_HOME` when set):
+
+```sh
+rm -r ~/.config/aasl ~/.local/share/aasl ~/.local/state/aasl ~/.cache/aasl
+```
+
+`~/.local/share/aasl` holds the prefix, so this removes Somnium and its settings too.
+
+AASL itself is not removed by `aasl uninstall`. How you remove it depends on how you installed it:
+
+- AppImage: delete the file and its `.old` copy.
+- Portable tarball: delete `aasl` and `aasl-gui`.
+- Package (AUR, distro): `sudo pacman -R aasl`, or your package manager's equivalent.
+
 ## Building
 
 ```sh
