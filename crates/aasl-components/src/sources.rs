@@ -8,7 +8,17 @@ pub const UMU_SHA256: &str = "eb590691841f7fad3fc3ad8fd5db4ccb87849fe7948e62b28e
 pub const LAUNCHER_REL_PATH: &str =
     "drive_c/Program Files/Somnium Space/Somnium Space Launcher.exe";
 pub const GAME_ID: &str = "umu-somnium";
-pub const YTDLP_EXTRACTOR_ARGS: &str = "youtube:player_client=android";
+/// Somnium Space's official Windows installer (Inno Setup), as linked from
+/// somniumspace.com.
+pub const SOMNIUM_INSTALLER_URL: &str =
+    "https://ai-space.fra1.cdn.digitaloceanspaces.com/launcher/installer/Somnium%20Space.exe";
+/// Official key art from somniumspace.com, fetched at run time for the
+/// launcher background (never shipped in AASL).
+pub const BACKGROUND_URL: &str =
+    "https://ai-space.fra1.cdn.digitaloceanspaces.com/website/somniumPoster.jpeg";
+/// AASL's GitHub repository: community recipes and their submission form.
+pub const REPO: &str = "Zutyosh/AASL";
+pub const COMMUNITY_RAW: &str = "https://raw.githubusercontent.com/Zutyosh/AASL/main/community";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Sources {
@@ -17,6 +27,7 @@ pub struct Sources {
     pub umu_sha256: String,
     /// GitHub API root, overridable for tests and mirrors.
     pub github_api: String,
+    pub somnium_installer_url: String,
 }
 
 impl Default for Sources {
@@ -27,6 +38,7 @@ impl Default for Sources {
             umu_version: UMU_VERSION.into(),
             umu_sha256: UMU_SHA256.into(),
             github_api: "https://api.github.com".into(),
+            somnium_installer_url: SOMNIUM_INSTALLER_URL.into(),
         }
     }
 }

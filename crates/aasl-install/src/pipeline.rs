@@ -87,10 +87,15 @@ impl Mode {
 
 #[derive(Debug, Clone, Default)]
 pub struct Options {
-    /// Somnium's official Windows installer, supplied by the user.
+    /// Somnium's official Windows installer when the user picked one;
+    /// None downloads it from somniumspace.com.
     pub somnium_installer: Option<PathBuf>,
     /// Use this patch bundle instead of the catalog's.
     pub local_bundle: Option<PathBuf>,
+    /// The compatibility recipe, checked. Decides the bundle with
+    /// `aasl_patches::choose`; None behaves like the default recipe
+    /// without a bundle built here.
+    pub recipe: Option<aasl_patches::Plan>,
     /// Path written into the desktop entry's Exec line.
     pub aasl_exe: Option<PathBuf>,
 }
@@ -363,16 +368,60 @@ impl Run<'_> {
     async fn patches(&mut self) -> Result<bool> {
         let id = self.proton_id()?;
         let proton = proton_dir(&self.inst.paths, &id);
-        let (bundle_id, archive) = match &self.opts.local_bundle {
-            Some(local) => (format!("local:{}", local.display()), local.clone()),
+        let cat = self
+            .catalog
+            .as_ref()
+            .ok_or_else(|| Error::Invalid("catalog not loaded".into()))?;
+        let published = cat.resolve(&id).into_iter().next();
+        let recipe = self.opts.recipe.as_ref();
+        let built = recipe.map(|p| {
+            aasl_patches::builder::built_bundle(&self.inst.paths.cache_dir, &id, &p.bundle_key(&id))
+        });
+        let source = aasl_patches::choose(
+            recipe.is_none_or(|p| p.needs_build()),
+            recipe.is_none_or(|p| p.recipe.id == aasl_patches::recipe::DEFAULT_RECIPE),
+            published.as_ref().map(|m| m.status),
+            built.as_ref().is_some_and(|b| b.is_file()),
+        );
+        let local = match (&self.opts.local_bundle, source) {
+            (Some(l), _) => Some(l.clone()),
+            (None, aasl_patches::Source::NotNeeded) => {
+                if bundle::record(&proton).is_some() {
+                    let n = bundle::restore(&proton)?;
+                    self.inst.notice(
+                        Severity::Info,
+                        format!("The recipe compiles nothing: restored {n} stock Proton files"),
+                    );
+                }
+                self.state.patch_bundle = None;
+                return Ok(true);
+            }
+            (None, aasl_patches::Source::Built) => built,
+            (None, aasl_patches::Source::MustBuild) if recipe.is_some() => {
+                return Err(Error::Invalid(format!(
+                    "Recipe {} has no bundle for {id} yet. Build it first (Settings, or `aasl recipe build`).",
+                    recipe.map(|p| p.recipe.id.as_str()).unwrap_or_default()
+                )));
+            }
+            (None, _) => None,
+        };
+        let (bundle_id, archive) = match local {
+            Some(local) => {
+                let id = format!("local:{}", local.display());
+                let st = bundle::status(&proton);
+                if self.opts.local_bundle.is_none()
+                    && st.bundle.as_deref() == Some(id.as_str())
+                    && st.intact
+                {
+                    self.state.patch_bundle = Some(id);
+                    return Ok(true);
+                }
+                (id, local)
+            }
             None => {
-                let cat = self
-                    .catalog
-                    .as_ref()
-                    .ok_or_else(|| Error::Invalid("catalog not loaded".into()))?;
-                let Some(m) = cat.resolve(&id).into_iter().next() else {
+                let Some(m) = published else {
                     return Err(Error::Invalid(format!(
-                        "No patch bundle exists for {id} yet, and Somnium cannot sign in without one. Choose a verified Proton ({}) or build a bundle with `aasl patch build --proton {id}`.",
+                        "No patch bundle exists for {id} yet, and Somnium cannot sign in without one. Choose a verified Proton ({}) or let AASL build the patches from Settings > Proton.",
                         cat.verified_protons().join(", ")
                     )));
                 };
@@ -447,37 +496,105 @@ impl Run<'_> {
     }
 
     async fn somnium_installer(&mut self) -> Result<bool> {
-        let launcher = self.inst.prefix().join(LAUNCHER_REL_PATH);
+        let prefix = self.inst.prefix();
+        let launcher = prefix.join(LAUNCHER_REL_PATH);
         if launcher.exists() {
             return Ok(true);
         }
-        let Some(exe) = &self.opts.somnium_installer else {
-            return Err(Error::Invalid(
-                "Somnium Space is not installed yet. Download the Windows installer from somniumspace.com and give its path.".into(),
-            ));
+        let exe = match self.opts.somnium_installer.clone() {
+            Some(exe) => exe,
+            None => self.download_installer().await?,
         };
-        if !exe.is_file()
-            || !exe
-                .extension()
-                .is_some_and(|e| e.eq_ignore_ascii_case("exe"))
-        {
+        if !exe.is_file() || !is_windows_exe(&exe) {
             return Err(Error::Invalid(format!(
-                "{} is not an .exe file",
+                "{} is not a Windows installer (.exe)",
                 exe.display()
             )));
         }
+        let lang = crate::inno_language(
+            self.inst
+                .config
+                .locale
+                .clone()
+                .or_else(crate::system_locale)
+                .as_deref()
+                .unwrap_or("en"),
+        );
         self.inst.notice(
             Severity::Info,
-            "Somnium's installer is opening. Follow its steps and keep the default folder.",
+            format!("Installing Somnium Space silently ({lang})."),
         );
-        let spec = self.umu_spec()?.arg(exe.display().to_string());
-        self.inst.exec.run(&spec, &self.inst.events).await?;
+        let spec = self
+            .umu_spec()?
+            .arg(exe.display().to_string())
+            .arg("/VERYSILENT")
+            .arg("/SUPPRESSMSGBOXES")
+            .arg("/NORESTART")
+            .arg("/SP-")
+            .arg(format!("/LANG={lang}"));
+        let exe_name = exe
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let finished_early = tokio::select! {
+            r = self.inst.exec.run(&spec, &self.inst.events) => { r?; false }
+            _ = wait_for_install(&launcher, &prefix, &exe_name) => true,
+        };
+        if finished_early {
+            // The installer started Somnium's launcher (or left Wine
+            // running): the files are in place, so close the prefix.
+            self.close_prefix().await;
+        }
         if !launcher.exists() {
             return Err(Error::Invalid(format!(
-                "Somnium's installer finished, but {LAUNCHER_REL_PATH} was not created. Run the install again and keep the default install folder."
+                "Somnium's installer finished, but {LAUNCHER_REL_PATH} was not created. Run the install again."
             )));
         }
         Ok(false)
+    }
+
+    async fn download_installer(&mut self) -> Result<PathBuf> {
+        let dest = self
+            .inst
+            .paths
+            .downloads_dir()
+            .join("SomniumSpaceSetup.exe");
+        self.inst
+            .notice(Severity::Info, "Downloading Somnium Space's installer");
+        let _ = std::fs::remove_file(&dest);
+        self.inst
+            .downloader
+            .fetch(
+                &self.inst.sources.somnium_installer_url,
+                &dest,
+                None,
+                self.progress("somnium"),
+            )
+            .await?;
+        Ok(dest)
+    }
+
+    /// Stop everything left in the prefix: wineserver -k, then SIGKILL.
+    async fn close_prefix(&self) {
+        if let Ok(id) = self.proton_id() {
+            let ws = proton_dir(&self.inst.paths, &id).join("files/bin/wineserver");
+            if ws.exists() {
+                let spec = aasl_core::exec::CommandSpec::new(ws)
+                    .arg("-k")
+                    .env("WINEPREFIX", self.inst.prefix().display().to_string());
+                let _ = tokio::time::timeout(
+                    std::time::Duration::from_secs(10),
+                    self.inst.exec.run(&spec, &self.inst.events),
+                )
+                .await;
+            }
+        }
+        for p in aasl_system::procs::prefix_processes(&self.inst.prefix()) {
+            let _ = nix::sys::signal::kill(
+                nix::unistd::Pid::from_raw(p.pid as i32),
+                nix::sys::signal::Signal::SIGKILL,
+            );
+        }
     }
 
     fn desktop_entry(&mut self) -> Result<bool> {
@@ -490,6 +607,40 @@ impl Run<'_> {
         desktop::write_entry(&self.inst.paths.desktop_entry(), &exe, None)?;
         Ok(false)
     }
+}
+
+/// Resolves once Somnium's launcher exists and no installer process is
+/// left in the prefix (two checks in a row), even if Wine keeps running
+/// because the installer started Somnium at the end.
+async fn wait_for_install(launcher: &Path, prefix: &Path, exe_name: &str) {
+    let mut calm = 0;
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        let installing = aasl_system::procs::prefix_processes(prefix)
+            .iter()
+            .any(|p| {
+                let c = p.cmdline.to_ascii_lowercase();
+                c.contains(".tmp")
+                    || (!exe_name.is_empty() && c.contains(&exe_name.to_ascii_lowercase()))
+            });
+        if launcher.exists() && !installing {
+            calm += 1;
+            if calm >= 2 {
+                return;
+            }
+        } else {
+            calm = 0;
+        }
+    }
+}
+
+fn is_windows_exe(p: &Path) -> bool {
+    use std::io::Read;
+    let mut magic = [0u8; 2];
+    std::fs::File::open(p)
+        .and_then(|mut f| f.read_exact(&mut magic))
+        .is_ok()
+        && &magic == b"MZ"
 }
 
 fn set_executable(p: &Path) -> Result<()> {

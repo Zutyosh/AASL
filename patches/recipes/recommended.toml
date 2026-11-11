@@ -1,0 +1,7 @@
+# AASL's default recipe. Copy it to make your own: `aasl recipe export
+# recommended > mine.toml`, edit, then `aasl recipe import mine.toml`.
+format = 1
+id = "recommended"
+title = "Recommended"
+description = "Everything Somnium needs on the Proton you pick: sign-in, video streams, YouTube with sound."
+ingredients = ["tls-client-certs", "media-by-url", "ytdlp-hook", "ytdlp-android-client"]

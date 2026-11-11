@@ -1,0 +1,69 @@
+# The ingredient library: every fix AASL knows, in the shape recipes use.
+# A recipe (patches/recipes/*.toml, or your own) picks ingredients by id.
+#
+# kind = "patch": Wine source patches, compiled into DLLs.
+#   base = "upstream": built on upstream Wine at upstream_commit, shipped
+#          as is (these DLLs replace Proton's whole).
+#   base = "proton":   built on the selected Proton's own Wine tree,
+#          prepared like its release (GE: protonprep-valve-staging.sh).
+#          All proton-base ingredients of a recipe share that tree, in
+#          recipe order, and only the DLLs they changed are shipped.
+#   patches     files under this directory, applied in order
+#   dlls        PE DLLs the patches may change; unix_libs their .so side
+#   superseded_if  skip the ingredient's patches when any condition
+#                  holds in the tree: the Proton already carries the fix.
+# kind = "env": environment variables for every launch, nothing to build.
+
+[[ingredient]]
+id = "tls-client-certs"
+title = "Sign-in: TLS client certificates"
+summary = "Somnium's sign-in needs schannel to send a client certificate and resume a parked handshake. Fixes the login that never completes."
+kind = "patch"
+base = "upstream"
+upstream_repo = "https://github.com/wine-mirror/wine.git"
+upstream_commit = "e99fc2f7587db7bc186293e9949fe0d3695cd430"
+patches = [
+    "wine/0001-crypt32-Add-OID.-prefix-for-unrecognized-RDN-OIDs-in.patch",
+    "wine/0002-secur32-Request-a-client-certificate-for-ASC_REQ_MUT.patch",
+    "wine/0003-secur32-Support-resuming-a-parked-handshake-after-SE.patch",
+    "wine/0004-secur32-Implement-SECPKG_ATTR_ISSUER_LIST_EX.patch",
+]
+dlls = ["secur32", "crypt32", "rsaenh"]
+unix_libs = ["secur32", "crypt32"]
+
+[[ingredient]]
+id = "media-by-url"
+title = "Video: RTSP and web streams by URL"
+summary = "Lets FFmpeg open rtsp:// and http(s) media directly and stops the scheme handler from blocking the game while it downloads."
+kind = "patch"
+base = "proton"
+requires_prep = "ge-video-rework"
+patches = [
+    "ge/0001-winedmo-Open-RTSP-streams-by-URL.patch",
+    "ge/0002-winedmo-Let-FFmpeg-open-remote-http-s-media-by-URL.patch",
+    "ge/0003-winedmo-Do-not-block-in-IMFSchemeHandler-BeginCreate.patch",
+]
+dlls = ["winedmo"]
+unix_libs = ["winedmo"]
+# GE-Proton11-12 and later open http(s) and rtsp media by URL from the IO
+# work item themselves (ge-video-rework 0078 and friends).
+superseded_if = [{ file = "dlls/winedmo/media_source.c", lacks = "URLOpenBlockingStreamW" }]
+
+[[ingredient]]
+id = "ytdlp-hook"
+title = "Video: yt-dlp hook"
+summary = "Proton's yt-dlp.exe hook, extended with PROTON_YTDLP_EXTRACTOR_ARGS, with the options placed before Somnium's \"--\"."
+kind = "patch"
+base = "proton"
+patches = [
+    "ge/0004-kernelbase-Redirect-yt-dlp.exe-and-allow-appending-e.patch",
+    "ge/0005-kernelbase-Insert-yt-dlp-options-after-argv-0.patch",
+]
+dlls = ["kernelbase"]
+
+[[ingredient]]
+id = "ytdlp-android-client"
+title = "Video: YouTube with sound"
+summary = "Asks yt-dlp for the android client, the last one serving h264 and AAC in one stream (360p). Needs ytdlp-hook."
+kind = "env"
+env = { PROTON_YTDLP_EXTRACTOR_ARGS = "youtube:player_client=android" }

@@ -1,22 +1,18 @@
 name: Patch bundle
 
-# Builds a Somnium patch bundle for one Proton build and attaches it to a
+# Builds a recipe's patch bundle for one Proton build and attaches it to a
 # GitHub release, so the catalog can point at it. Run it from the Actions
-# tab after adding or changing a patch, or when a new Proton is out.
+# tab after adding or changing an ingredient, or when a new Proton is out.
 on:
   workflow_dispatch:
     inputs:
       proton:
         description: "Proton build as provider:tag (ge:GE-Proton11-12, cachyos:cachyos-11.0-20261015-slr)"
         required: true
-      series:
-        description: "Series to build, space separated (empty = all)"
+      recipe:
+        description: "Recipe id from patches/recipes/"
         required: false
-        default: ""
-      ffmpeg:
-        description: "Also rebuild ffmpeg with dav1d"
-        type: boolean
-        default: true
+        default: "recommended"
 
 permissions:
   contents: write
@@ -37,20 +33,20 @@ jobs:
         env:
           AASL_PATCHES_DIR: ${{ github.workspace }}/patches
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PROTON: ${{ inputs.proton }}
+          RECIPE: ${{ inputs.recipe }}
         run: |
-          series=""
-          for s in ${{ inputs.series }}; do series="$series --series $s"; done
-          ffmpeg=""
-          [ "${{ inputs.ffmpeg }}" = "true" ] && ffmpeg="--ffmpeg"
-          ./target/release/aasl patch plan "${{ inputs.proton }}" $series $ffmpeg
-          ./target/release/aasl patch build "${{ inputs.proton }}" $series $ffmpeg
+          ./target/release/aasl recipe show "$RECIPE"
+          ./target/release/aasl recipe build "$RECIPE" --proton "$PROTON"
       - name: Publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PROTON: ${{ inputs.proton }}
+          RECIPE: ${{ inputs.recipe }}
         run: |
-          id="${{ inputs.proton }}"
-          tag="patches-${id/:/-}-${{ github.run_number }}"
+          id="$PROTON"
+          tag="patches-$RECIPE-${id/:/-}-${{ github.run_number }}"
           out=~/.cache/aasl/patch-builder/out
-          gh release create "$tag" --prerelease --title "Patches for $id" \
+          gh release create "$tag" --prerelease --title "Recipe $RECIPE for $id" \
             --notes "Built from $(git rev-parse --short HEAD). Add it to data/catalog.toml as untested, then verified once someone has played with it." \
             "$out"/*.tar.gz "$out"/*.sha256

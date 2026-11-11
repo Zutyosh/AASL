@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use aasl_components::sources::{GAME_ID, YTDLP_EXTRACTOR_ARGS};
+use aasl_components::sources::GAME_ID;
 use aasl_core::Config;
 use aasl_system::{Host, OpenXrRuntime};
 use serde::Serialize;
@@ -18,16 +18,13 @@ pub struct LaunchEnv {
 
 /// Build the launch environment. Order: base umu variables, OpenXR (from
 /// detection, or replaced wholesale by `config.openxr_env`), then the
-/// user's own `config.env`, which wins over everything.
+/// user's own `config.env` (the service puts the recipe's environment
+/// in front of it), which wins over everything.
 pub fn build_env(host: &dyn Host, config: &Config, proton: &Path, prefix: &Path) -> LaunchEnv {
     let mut env = BTreeMap::new();
     env.insert("PROTONPATH".into(), proton.display().to_string());
     env.insert("WINEPREFIX".into(), prefix.display().to_string());
     env.insert("GAMEID".into(), GAME_ID.into());
-    env.insert(
-        "PROTON_YTDLP_EXTRACTOR_ARGS".into(),
-        YTDLP_EXTRACTOR_ARGS.into(),
-    );
 
     let (runtime, runtime_label) = if let Some(over) = &config.openxr_env {
         env.extend(over.clone());

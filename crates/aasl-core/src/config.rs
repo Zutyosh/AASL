@@ -20,6 +20,11 @@ pub struct Config {
     /// Proton build as `provider:tag` (`ge:GE-Proton11-5`). None means the
     /// catalog's recommendation.
     pub proton: Option<String>,
+    /// Compatibility recipe id. None means the built-in "recommended".
+    pub recipe: Option<String>,
+    /// Measure each session (crashes, worlds, videos, frame pacing with
+    /// MangoHud when installed) into a local report. Nothing is sent.
+    pub session_reports: bool,
     /// Where the catalog of Proton recommendations and patch bundles lives.
     pub catalog_url: String,
     /// GitHub token for the release API (higher rate limit). GITHUB_TOKEN
@@ -47,6 +52,8 @@ impl Default for Config {
             version: CONFIG_VERSION,
             prefix: None,
             proton: None,
+            recipe: None,
+            session_reports: true,
             catalog_url: DEFAULT_CATALOG_URL.into(),
             github_token: None,
             wait_for_headset: true,
