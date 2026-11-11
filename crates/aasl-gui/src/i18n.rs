@@ -519,6 +519,16 @@ const TABLE: &[(&str, &str, &str)] = &[
         "Elle date d'avant que AASL garde le détail, ou MangoHud n'était pas là.",
     ),
     (
+        "ses.partial",
+        "Only part of the session was measured",
+        "Une partie seulement de la session a été mesurée",
+    ),
+    (
+        "ses.partial.sub",
+        "MangoHud saw {} of {}: it only measures what the game draws in its window, not in the headset. The figures cover that part.",
+        "MangoHud a vu {} sur {} : il ne mesure que ce que le jeu affiche dans sa fenêtre, pas dans le casque. Les chiffres portent sur cette partie.",
+    ),
+    (
         "ses.slow",
         "What slowed the game down",
         "Ce qui a ralenti le jeu",
@@ -665,8 +675,8 @@ const TABLE: &[(&str, &str, &str)] = &[
     ),
     (
         "fix.ytdlp-android-client.title",
-        "YouTube with sound",
-        "YouTube avec le son",
+        "YouTube with sound (obsolete)",
+        "YouTube avec le son (obsolète)",
     ),
     (
         "fix.ytdlp-android-client.sum",

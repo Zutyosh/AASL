@@ -23,7 +23,12 @@ a development build read it live.
 | `tls-client-certs` | upstream Wine at `upstream_commit` | secur32, crypt32, rsaenh |
 | `media-by-url` | the Proton's own Wine, prepared like its release | winedmo |
 | `ytdlp-hook` | the Proton's own Wine | kernelbase |
-| `ytdlp-android-client` | nothing (environment) | `PROTON_YTDLP_EXTRACTOR_ARGS` |
+| `ytdlp-android-client` | nothing (environment) | `PROTON_YTDLP_EXTRACTOR_ARGS` (obsolete, somnilux#32) |
+| `no-wintab` | nothing (environment) | `WINEDLLOVERRIDES=wintab32=d` |
+
+`recommended` targets the latest GE-Proton: `tls-client-certs` and
+`no-wintab` only. `media-by-url` and `ytdlp-hook` stay in the library
+for recipes on older GE-Proton releases.
 
 ## Recipes
 

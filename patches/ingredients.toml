@@ -63,7 +63,14 @@ dlls = ["kernelbase"]
 
 [[ingredient]]
 id = "ytdlp-android-client"
-title = "Video: YouTube with sound"
-summary = "Asks yt-dlp for the android client, the last one serving h264 and AAC in one stream (360p). Needs ytdlp-hook."
+title = "Video: YouTube with sound (obsolete)"
+summary = "Asks yt-dlp for the android client (360p, h264 and AAC in one stream). Obsolete: YouTube no longer serves it and videos fail to play (somnilux#32). Kept for older recipes only. Needs ytdlp-hook."
 kind = "env"
 env = { PROTON_YTDLP_EXTRACTOR_ARGS = "youtube:player_client=android" }
+
+[[ingredient]]
+id = "no-wintab"
+title = "Launcher: no Wintab"
+summary = "Disables wintab32. The WPF launcher loads it for stylus input, and under XWayland a VR runtime adding input devices makes Wine's XInput 1 tablet scan die on BadMatch, killing the launcher (somnilux#22). Costs nothing without a drawing tablet."
+kind = "env"
+env = { WINEDLLOVERRIDES = "wintab32=d" }

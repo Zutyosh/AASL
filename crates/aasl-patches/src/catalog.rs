@@ -155,9 +155,16 @@ mod tests {
 
     #[test]
     fn wildcard_and_exact() {
-        let c = Catalog::embedded();
+        let t = "schema = 1\nrecommended_proton = \"ge:GE-Proton11-5\"\n[[bundle]]\nid = \"x\"\ntitle = \"x\"\narchive_format = 2\nurl = \"u\"\ntargets = [\n  { proton = \"ge:GE-Proton11-5\", status = \"verified\" },\n  { proton = \"ge:GE-Proton11-*\", status = \"untested\" },\n]\n";
+        let c = Catalog::parse(t).unwrap();
         let m = c.resolve(&ProtonId::new("ge", "GE-Proton11-12"));
         assert_eq!(m[0].status, TargetStatus::Untested);
+        assert!(
+            Catalog::embedded()
+                .resolve(&ProtonId::new("ge", "GE-Proton11-12"))
+                .is_empty(),
+            "11-5's winedmo must not replace a newer GE's"
+        );
         assert!(c.resolve(&ProtonId::new("ge", "GE-Proton10-4")).is_empty());
         assert!(
             c.resolve(&ProtonId::new("cachyos", "cachyos-11.0-20261015-slr"))

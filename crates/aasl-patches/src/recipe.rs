@@ -678,22 +678,22 @@ mod tests {
     fn embedded_library_and_default_recipe() {
         let l = lib();
         assert!(l.get("tls-client-certs").is_some());
+        assert!(l.get("media-by-url").is_some(), "kept for older Protons");
         let p = l.plan(&recommended()).unwrap();
         assert!(p.needs_build());
         assert!(!p.has_custom_code());
-        assert_eq!(
-            p.env()["PROTON_YTDLP_EXTRACTOR_ARGS"],
-            "youtube:player_client=android"
+        assert_eq!(p.env()["WINEDLLOVERRIDES"], "wintab32=d");
+        assert!(
+            !p.env().contains_key("PROTON_YTDLP_EXTRACTOR_ARGS"),
+            "the android client breaks YouTube (somnilux#32)"
         );
         let g = p.groups();
         assert_eq!(
             g.iter().map(|g| g.id.as_str()).collect::<Vec<_>>(),
-            ["upstream", "proton"]
+            ["upstream"],
+            "GE's own winedmo and kernelbase ship untouched"
         );
-        assert_eq!(g[1].dlls, ["winedmo", "kernelbase"]);
-        assert_eq!(g[1].requires_prep.as_deref(), Some("ge-video-rework"));
-        assert!(g[1].patches[0].0.starts_with("0001-media-by-url-0001-"));
-        assert_eq!(g[1].patches.len(), 5);
+        assert_eq!(g[0].dlls, ["secur32", "crypt32", "rsaenh"]);
     }
 
     #[test]
@@ -704,17 +704,22 @@ mod tests {
             .unwrap()
             .materialise(d.path())
             .unwrap();
-        assert_eq!(ids, ["upstream", "proton"]);
+        assert_eq!(ids, ["upstream"]);
         let series = std::fs::read_to_string(d.path().join("series.toml")).unwrap();
         assert!(series.contains("upstream_commit = \"e99fc2f"));
-        let sup = std::fs::read_to_string(d.path().join("proton/superseded")).unwrap();
-        assert!(sup.contains("0001-media-by-url-0001-winedmo-Open-RTSP-streams-by-URL.patch lacks dlls/winedmo/media_source.c URLOpenBlockingStreamW"));
+        assert!(!d.path().join("proton").exists());
         assert_eq!(
             std::fs::read_dir(d.path().join("upstream"))
                 .unwrap()
                 .count(),
             5
         );
+        let mut old = recommended();
+        old.ingredients = vec!["media-by-url".into()];
+        let d = tempfile::tempdir().unwrap();
+        lib().plan(&old).unwrap().materialise(d.path()).unwrap();
+        let sup = std::fs::read_to_string(d.path().join("proton/superseded")).unwrap();
+        assert!(sup.contains("0001-media-by-url-0001-winedmo-Open-RTSP-streams-by-URL.patch lacks dlls/winedmo/media_source.c URLOpenBlockingStreamW"));
     }
 
     #[test]

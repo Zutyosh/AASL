@@ -3,5 +3,12 @@
 format = 1
 id = "recommended"
 title = "Recommended"
-description = "Everything Somnium needs on the Proton you pick: sign-in, video streams, YouTube with sound."
-ingredients = ["tls-client-certs", "media-by-url", "ytdlp-hook", "ytdlp-android-client"]
+description = "Built for the latest GE-Proton: sign-in fix, launcher stability in VR. Videos, streams and the exit crash are handled by GE-Proton itself."
+# GE-Proton11-12 carries the video work this recipe used to patch in:
+# http(s)/RTSP/HLS by URL without blocking (ge-video-rework 0078, 0083,
+# 0084, 0087, 0104), googlevideo progressive streams (0028), AV1 through
+# dav1d, and UiaDisconnectAllProviders (somnilux#29). Only the schannel
+# client-certificate fix is still missing upstream of GE, so the build
+# is the small upstream-Wine one and GE's own winedmo/ffmpeg ship as is.
+# yt-dlp runs with its defaults (somnilux#32).
+ingredients = ["tls-client-certs", "no-wintab"]

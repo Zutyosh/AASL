@@ -18,7 +18,8 @@ archive_format = 2
 url = "https://github.com/Vulps22/somnilux/releases/download/somnilux-binaries-build-1/somnilux-binaries.tar.gz"
 sha256 = "328bccf4c2864db800e82d02a8732480e2923a0fdfe7f265823cfd066e0645c6"
 series = ["tls", "media"]
+# Only 11-5: on a newer GE-Proton its winedmo and kernelbase (built
+# from 11-5's Wine) would replace GE's own, newer video stack.
 targets = [
   { proton = "ge:GE-Proton11-5", status = "verified" },
-  { proton = "ge:GE-Proton11-*", status = "untested" },
 ]
