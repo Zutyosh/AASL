@@ -1,13 +1,12 @@
-//! Root: a full-bleed hero with the launcher on top, the first-run wizard,
-//! or the settings view.
+//! Root: the key art behind everything, then the launcher, the first-run
+//! wizard or the settings.
 
 use freya::prelude::*;
 
 use crate::state::{Screen, use_ui};
-use crate::theme::{T, aasl_theme, size, space};
+use crate::theme::{RADIUS_PANEL, T, aasl_theme, alpha, size, space};
 use crate::{launcher, settings, widgets, wizard};
 
-pub const HERO: &[u8] = include_bytes!("../assets/hero.jpg");
 pub const LOGO: &[u8] = include_bytes!("../assets/logo.png");
 
 pub fn app() -> impl IntoElement {
@@ -15,45 +14,53 @@ pub fn app() -> impl IntoElement {
     let ui = use_ui();
     let screen = *ui.screen.read();
     let body: Element = match screen {
-        Screen::Launcher => launcher::view(ui).into_element(),
-        Screen::Wizard => wizard::view(ui).into_element(),
-        Screen::Settings => settings::view(ui).into_element(),
+        Screen::Launcher => launcher::LauncherScreen(ui).into_element(),
+        Screen::Wizard => wizard::WizardScreen(ui).into_element(),
+        Screen::Settings => settings::SettingsScreen(ui).into_element(),
     };
+    let bg = ui.background.read().clone();
     rect()
         .expanded()
         .background(T.bg)
         .color(T.text)
         .font_size(size::BODY)
-        .maybe_child((screen != Screen::Settings).then(hero))
+        .maybe_child((screen != Screen::Settings).then(|| backdrop(bg, screen == Screen::Wizard)))
         .child(body)
+        .maybe_child(crate::state::building(ui).then_some(crate::build_screen::BuildScreen(ui)))
         .maybe_child(ui.error.read().clone().map(move |msg| error_toast(ui, msg)))
 }
 
-/// The background picture, cover-scaled, with a gradient so text reads.
-fn hero() -> impl IntoElement {
+fn layer() -> Rect {
     rect()
         .position(Position::new_absolute().top(0.).left(0.))
         .width(Size::fill())
         .height(Size::fill())
-        .child(
-            ImageViewer::new(HERO)
-                .width(Size::fill())
-                .height(Size::fill())
-                .aspect_ratio(AspectRatio::Max)
-                .image_cover(ImageCover::Center),
-        )
-        .child(
-            rect()
-                .position(Position::new_absolute().top(0.).left(0.))
-                .width(Size::fill())
-                .height(Size::fill())
-                .background(
-                    LinearGradient::new()
-                        .angle(180.)
-                        .stop((Color::from_af32rgb(0.0, 0x12, 0x14, 0x17), 0.35))
-                        .stop((Color::from_af32rgb(0.92, 0x12, 0x14, 0x17), 1.0)),
-                ),
-        )
+}
+
+/// Somnium's key art, cover-scaled, darkened towards the bottom so the
+/// bar reads. The wizard dims it further so the text sits on calm ground.
+fn backdrop(bg: Option<std::path::PathBuf>, dim: bool) -> impl IntoElement {
+    // Images paint above sibling rects, so the dimming is the picture's own
+    // opacity over the background colour rather than an overlay.
+    layer().maybe_child(bg.map(|p| {
+        rect()
+            .width(Size::fill())
+            .height(Size::fill())
+            .opacity(if dim { 0.3 } else { 1.0 })
+            .child(
+                ImageViewer::new(p)
+                    .width(Size::fill())
+                    .height(Size::fill())
+                    .aspect_ratio(AspectRatio::Max)
+                    .image_cover(ImageCover::Center),
+            )
+    }))
+}
+
+pub fn logo(px: f32) -> impl IntoElement {
+    ImageViewer::new(LOGO)
+        .width(Size::px(px))
+        .height(Size::px(px))
 }
 
 pub fn brand() -> impl IntoElement {
@@ -61,38 +68,43 @@ pub fn brand() -> impl IntoElement {
         .horizontal()
         .cross_align(Alignment::Center)
         .spacing(space::M)
+        .child(logo(32.))
         .child(
-            ImageViewer::new(LOGO)
-                .width(Size::px(40.))
-                .height(Size::px(40.)),
-        )
-        .child(
-            rect()
-                .child(
-                    label()
-                        .text("AASL")
-                        .font_size(size::LEAD)
-                        .font_weight(FontWeight::BOLD)
-                        .color(T.text),
-                )
-                .child(widgets::muted(crate::i18n::t("app.tagline"))),
+            label()
+                .text("AASL")
+                .font_size(size::LEAD)
+                .font_weight(FontWeight::SEMI_BOLD)
+                .color(T.text),
         )
 }
 
 fn error_toast(mut ui: crate::state::Ui, msg: String) -> impl IntoElement {
     rect()
-        .position(Position::new_absolute().top(space::L).right(space::L))
-        .max_width(Size::px(460.))
+        .position(Position::new_absolute().top(space::L).left(0.))
+        .width(Size::fill())
+        .center()
         .child(
-            widgets::glass_panel()
-                .border(Border::new().fill(T.error).width(1.))
-                .spacing(space::S)
-                .child(label().text(msg).color(T.error))
+            rect()
+                .max_width(Size::px(560.))
+                .horizontal()
+                .cross_align(Alignment::Center)
+                .spacing(space::M)
+                .padding((space::M, space::L))
+                .corner_radius(RADIUS_PANEL)
+                .background(T.raised)
+                .border(Border::new().fill(alpha(T.error, 0.6)).width(1.))
+                .child(widgets::dot(widgets::Tone::Error))
+                .child(
+                    rect()
+                        .max_width(Size::px(440.))
+                        .child(label().text(msg).color(T.text)),
+                )
                 .child(
                     Button::new()
                         .flat()
+                        .compact()
                         .on_press(move |_| ui.error.set(None))
-                        .child("OK"),
+                        .child(crate::i18n::t("dismiss")),
                 ),
         )
 }

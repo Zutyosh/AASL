@@ -2,12 +2,20 @@
 
 use freya::prelude::*;
 
-use crate::theme::{RADIUS_PANEL, T, glass, size, space};
+use crate::theme::{RADIUS_CONTROL, RADIUS_PANEL, RADIUS_PILL, T, alpha, glass, size, space};
 
 pub fn title(text: impl Into<String>) -> Label {
     label()
         .text(text.into())
         .font_size(size::TITLE)
+        .font_weight(FontWeight::SEMI_BOLD)
+        .color(T.text)
+}
+
+pub fn display(text: impl Into<String>) -> Label {
+    label()
+        .text(text.into())
+        .font_size(size::DISPLAY)
         .font_weight(FontWeight::SEMI_BOLD)
         .color(T.text)
 }
@@ -26,18 +34,44 @@ pub fn muted(text: impl Into<String>) -> Label {
         .color(T.muted)
 }
 
-/// Frosted panel over the hero.
+/// Frosted panel over the key art.
 pub fn glass_panel() -> Rect {
     rect()
         .background(glass())
-        .backdrop_blur(24.)
+        .backdrop_blur(30.)
         .corner_radius(RADIUS_PANEL)
-        .border(
-            Border::new()
-                .fill(Color::from_af32rgb(0.08, 255, 255, 255))
-                .width(1.),
-        )
+        .border(Border::new().fill(alpha(T.text, 0.08)).width(1.))
         .padding(space::L)
+}
+
+/// The main call to action: a filled pill.
+pub fn pill(text: impl Into<String>) -> Button {
+    Button::new().filled().child(
+        label()
+            .text(text.into())
+            .font_size(size::LEAD)
+            .font_weight(FontWeight::SEMI_BOLD)
+            .color(T.accent_text),
+    )
+}
+
+/// A quiet text button for secondary paths.
+pub fn link(text: impl Into<String>) -> Button {
+    Button::new().flat().compact().child(
+        label()
+            .text(text.into())
+            .font_size(size::SMALL)
+            .color(T.muted),
+    )
+}
+
+/// Sliders icon for Settings.
+pub fn settings_icon() -> impl IntoElement {
+    const SVG: &str = r#"<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="white" stroke-width="2" stroke-linecap="round"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/></svg>"#;
+    SvgViewer::new(SVG.as_bytes())
+        .stroke(T.text)
+        .width(Size::px(22.))
+        .height(Size::px(22.))
 }
 
 /// A group of preference rows, libadwaita-style.
@@ -48,15 +82,15 @@ pub fn group(heading_text: &str, rows: Vec<Element>) -> Rect {
         .child(
             label()
                 .text(heading_text.to_string())
-                .font_size(size::SMALL)
+                .font_size(size::BODY)
                 .font_weight(FontWeight::SEMI_BOLD)
-                .color(T.muted),
+                .color(T.text),
         )
         .child(
             rect()
                 .width(Size::fill())
                 .background(T.surface)
-                .corner_radius(RADIUS_PANEL)
+                .corner_radius(RADIUS_CONTROL + 2.)
                 .border(Border::new().fill(T.border).width(1.))
                 .children(rows),
         )
@@ -107,18 +141,12 @@ impl Tone {
     }
 }
 
-/// Small rounded label with a coloured edge, for statuses.
+/// Small rounded status label.
 pub fn chip(text: impl Into<String>, tone: Tone) -> Rect {
-    let (r, g, b) = tone.color();
     rect()
         .padding((3., 10.))
-        .corner_radius(999.)
-        .background(Color::from_af32rgb(0.16, r, g, b))
-        .border(
-            Border::new()
-                .fill(Color::from_af32rgb(0.5, r, g, b))
-                .width(1.),
-        )
+        .corner_radius(RADIUS_PILL)
+        .background(alpha(tone.color(), 0.14))
         .child(
             label()
                 .text(text.into())
@@ -127,15 +155,31 @@ pub fn chip(text: impl Into<String>, tone: Tone) -> Rect {
         )
 }
 
-/// Status line inside the bottom bar: a label above a value.
+/// A coloured dot, for compact status.
+pub fn dot(tone: Tone) -> Rect {
+    rect()
+        .width(Size::px(8.))
+        .height(Size::px(8.))
+        .corner_radius(4.)
+        .background(tone.color())
+}
+
+/// Status in the bottom bar: a dot, a name and a value.
 pub fn stat(name: &str, value: impl Into<String>, tone: Tone) -> Rect {
-    rect().spacing(2.).child(muted(name.to_string())).child(
-        label()
-            .text(value.into())
-            .font_size(size::BODY)
-            .font_weight(FontWeight::MEDIUM)
-            .color(tone.color()),
-    )
+    rect()
+        .horizontal()
+        .cross_align(Alignment::Center)
+        .spacing(space::S)
+        .child(dot(tone))
+        .child(
+            rect().spacing(1.).child(muted(name.to_string())).child(
+                label()
+                    .text(value.into())
+                    .font_size(size::BODY)
+                    .font_weight(FontWeight::MEDIUM)
+                    .color(T.text),
+            ),
+        )
 }
 
 pub fn severity_tone(s: aasl_core::Severity) -> Tone {
@@ -144,4 +188,11 @@ pub fn severity_tone(s: aasl_core::Severity) -> Tone {
         aasl_core::Severity::Warn => Tone::Warn,
         aasl_core::Severity::Info => Tone::Neutral,
     }
+}
+
+/// Percentage of a progress event, if the total is known.
+pub fn percent(done: u64, total: Option<u64>) -> Option<f32> {
+    total
+        .filter(|t| *t > 0)
+        .map(|t| (done as f32 * 100. / t as f32).clamp(0., 100.))
 }

@@ -1,5 +1,7 @@
-//! First run: welcome, system check, Proton choice, Somnium's installer,
-//! progress, done.
+//! First run: welcome, Proton choice, where Somnium's installer comes
+//! from, then a silent background install behind a loading screen.
+
+use std::path::PathBuf;
 
 use aasl_core::Severity;
 use aasl_service::InstallOptions;
@@ -7,16 +9,15 @@ use freya::prelude::*;
 
 use crate::i18n::{step, t};
 use crate::state::{Screen, Ui};
-use crate::theme::{T, size, space};
-use crate::widgets::{Tone, body, chip, glass_panel, muted, title};
+use crate::theme::{RADIUS_PILL, T, alpha, space};
+use crate::widgets::{Tone, body, chip, display, dot, link, muted, percent, pill, title};
 use crate::{app, svc};
 
 #[derive(Clone, Copy, PartialEq)]
 enum Page {
     Welcome,
-    System,
     Proton,
-    Installer,
+    Source,
     Installing,
     Done,
 }
@@ -33,45 +34,162 @@ const STEPS: &[&str] = &[
     "desktop_entry",
 ];
 
-pub fn view(ui: Ui) -> impl IntoElement {
-    let page = use_state(|| Page::Welcome);
-    let path = use_state(String::new);
-    let chosen = use_state(|| svc().catalog_now().recommended_proton.clone());
-    let content: Element = match *page.read() {
-        Page::Welcome => welcome(page).into_element(),
-        Page::System => system(page).into_element(),
-        Page::Proton => proton(ui, page, chosen).into_element(),
-        Page::Installer => installer(ui, page, path, chosen).into_element(),
-        Page::Installing => installing(ui, page).into_element(),
-        Page::Done => done(ui).into_element(),
-    };
-    rect()
-        .expanded()
-        .padding(space::XL)
-        .content(Content::Flex)
-        .child(app::brand())
-        .child(
-            rect()
-                .width(Size::fill())
-                .height(Size::flex(1.))
-                .center()
-                .child(
-                    glass_panel()
-                        .width(Size::px(620.))
-                        .padding(space::XXL)
-                        .spacing(space::L)
-                        .child(dots(*page.read()))
-                        .child(content),
-                ),
-        )
+const PHRASES: usize = 10;
+
+#[derive(PartialEq)]
+pub struct WizardScreen(pub Ui);
+
+impl Component for WizardScreen {
+    fn render(&self) -> impl IntoElement {
+        let ui = self.0;
+        let page = use_state(first_page);
+        let chosen = use_state(|| svc().catalog_now().recommended_proton.clone());
+        let picked = use_state(|| None::<PathBuf>);
+        let mut hover = use_state(|| false);
+        let mut phrase = use_state(|| 0usize);
+        let mut failed = use_state(|| None::<String>);
+        use_future(move || async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_millis(4500)).await;
+                let n = (*phrase.peek() + 1 + (now_ms() % 3) as usize) % PHRASES;
+                phrase.set(n);
+            }
+        });
+        // Safety net: if the install finished while this screen missed the
+        // result, the files on disk still say so.
+        use_future(move || async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                if *page.peek() == Page::Installing && failed.peek().is_none() {
+                    let st = svc().status();
+                    if st.installed && st.operation.is_none() && st.state.installed_at.is_some() {
+                        let mut page = page;
+                        page.set(Page::Done);
+                    }
+                }
+            }
+        });
+        let w = Wiz {
+            ui,
+            page,
+            chosen,
+            picked,
+            failed,
+        };
+        let content: Element = match *page.read() {
+            Page::Welcome => welcome(w).into_element(),
+            Page::Proton => proton(w).into_element(),
+            Page::Source => source(w, *hover.read()).into_element(),
+            Page::Installing => installing(w, *phrase.read()).into_element(),
+            Page::Done => done(w).into_element(),
+        };
+        rect()
+            .expanded()
+            .padding(space::XXL)
+            .content(Content::Flex)
+            .on_global_file_hover(move |_| {
+                if *page.peek() == Page::Source {
+                    hover.set(true)
+                }
+            })
+            .on_global_file_hover_cancelled(move |_| hover.set(false))
+            .on_file_drop(move |e: Event<FileEventData>| {
+                hover.set(false);
+                if *page.peek() != Page::Source {
+                    return;
+                }
+                match e.file_paths.iter().find(|p| is_exe(p)) {
+                    Some(p) => start(w, Some(p.clone())),
+                    None => failed.set(Some(t("wiz.source.not_exe").into())),
+                }
+            })
+            .child(app::brand())
+            .child(
+                rect()
+                    .width(Size::fill())
+                    .height(Size::flex(1.))
+                    .center()
+                    .child(
+                        rect()
+                            .width(Size::px(600.))
+                            .cross_align(Alignment::Center)
+                            .spacing(space::L)
+                            .padding((space::XXL + 8., space::XXXL))
+                            .corner_radius(28.)
+                            .background(alpha(T.bg, 0.82))
+                            .backdrop_blur(40.)
+                            .border(
+                                Border::new()
+                                    .fill(if *hover.read() {
+                                        alpha(T.accent, 1.0)
+                                    } else {
+                                        alpha(T.text, 0.1)
+                                    })
+                                    .width(if *hover.read() { 2. } else { 1. }),
+                            )
+                            .shadow(Shadow::new().y(24.).blur(64.).color(alpha((0, 0, 0), 0.45)))
+                            .child(content),
+                    ),
+            )
+            .child(
+                rect()
+                    .width(Size::fill())
+                    .center()
+                    .child(dots(*page.read())),
+            )
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Lets the snapshot test open a given page.
+    pub static TEST_PAGE: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };
+}
+
+fn first_page() -> Page {
+    #[cfg(test)]
+    {
+        return match TEST_PAGE.with(|p| p.get()) {
+            1 => Page::Proton,
+            2 => Page::Source,
+            3 => Page::Installing,
+            4 => Page::Done,
+            _ => Page::Welcome,
+        };
+    }
+    #[allow(unreachable_code)]
+    Page::Welcome
+}
+
+#[derive(Clone, Copy, PartialEq)]
+struct Wiz {
+    ui: Ui,
+    page: State<Page>,
+    chosen: State<String>,
+    picked: State<Option<PathBuf>>,
+    failed: State<Option<String>>,
+}
+
+fn now_ms() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or_default()
+}
+
+fn is_exe(p: &std::path::Path) -> bool {
+    p.is_file() && p.extension().is_some_and(|e| e.eq_ignore_ascii_case("exe"))
+}
+
+fn centered(text: Label) -> Label {
+    text.text_align(TextAlign::Center).width(Size::fill())
 }
 
 fn dots(current: Page) -> impl IntoElement {
     let pages = [
         Page::Welcome,
-        Page::System,
         Page::Proton,
-        Page::Installer,
+        Page::Source,
         Page::Installing,
         Page::Done,
     ];
@@ -81,138 +199,91 @@ fn dots(current: Page) -> impl IntoElement {
             .map(|i| {
                 rect()
                     .key(i)
-                    .width(Size::px(if i == idx { 22. } else { 8. }))
-                    .height(Size::px(8.))
-                    .corner_radius(4.)
-                    .background(if i <= idx { T.accent } else { T.border })
+                    .width(Size::px(if i == idx { 20. } else { 6. }))
+                    .height(Size::px(6.))
+                    .corner_radius(3.)
+                    .background(if i == idx {
+                        alpha(T.text, 0.9)
+                    } else {
+                        alpha(T.text, 0.25)
+                    })
+                    .into_element()
             })
             .collect::<Vec<_>>(),
     )
 }
 
-fn nav(
-    mut page: State<Page>,
-    back: Option<Page>,
-    next: Option<(Page, &'static str, bool)>,
-) -> impl IntoElement {
+fn actions(children: Vec<Element>) -> Rect {
     rect()
-        .width(Size::fill())
         .horizontal()
-        .main_align(Alignment::End)
-        .spacing(space::S)
-        .padding((space::S, 0., 0., 0.))
-        .maybe_child(back.map(|b| {
-            Button::new()
-                .flat()
-                .on_press(move |_| page.set(b))
-                .child(t("wiz.back"))
-        }))
-        .maybe_child(next.map(|(n, label_key, enabled)| {
-            Button::new()
-                .filled()
-                .enabled(enabled)
-                .on_press(move |_| page.set(n))
-                .child(t(label_key))
-        }))
-}
-
-fn welcome(page: State<Page>) -> impl IntoElement {
-    rect()
         .spacing(space::M)
-        .child(
-            label()
-                .text(t("wiz.welcome.title"))
-                .font_size(size::DISPLAY)
-                .font_weight(FontWeight::BOLD)
-                .color(T.text),
-        )
-        .child(body(t("wiz.welcome.body")))
-        .child(nav(page, None, Some((Page::System, "wiz.start", true))))
-}
-
-fn check(label_text: String, ok: bool, warn_only: bool) -> Rect {
-    let tone = if ok {
-        Tone::Ok
-    } else if warn_only {
-        Tone::Warn
-    } else {
-        Tone::Error
-    };
-    rect()
-        .width(Size::fill())
-        .horizontal()
-        .content(Content::Flex)
         .cross_align(Alignment::Center)
-        .spacing(space::M)
-        .child(
-            rect()
-                .width(Size::px(10.))
-                .height(Size::px(10.))
-                .corner_radius(5.)
-                .background(tone.color()),
-        )
-        .child(rect().width(Size::flex(1.)).child(body(label_text)))
+        .padding((space::S, 0., 0., 0.))
+        .children(children)
 }
 
-fn system(page: State<Page>) -> impl IntoElement {
+fn primary(text: &str) -> Button {
+    pill(text).corner_radius(RADIUS_PILL).padding((12., 36.))
+}
+
+fn welcome(mut w: Wiz) -> impl IntoElement {
     let sys = svc().system();
-    let vr = svc().vr_status();
-    let distro = sys
-        .distro
-        .as_ref()
-        .map(|d| d.name.clone())
-        .unwrap_or_else(|| "Linux".into());
-    let py_ok = sys.python.is_some_and(|p| p.supported());
-    let py = sys
-        .python
-        .map(|p| format!("Python {p}"))
-        .unwrap_or_else(|| "Python 3 missing".into());
-    let gpu = sys
-        .gpus
-        .first()
-        .map(|g| {
-            format!(
-                "{} GPU, {} Vulkan driver(s)",
-                g.vendor,
-                sys.vulkan_icds.len()
-            )
-        })
-        .unwrap_or_else(|| "No GPU found".into());
-    let runtimes = if vr.installed.is_empty() {
-        "No VR runtime installed".to_string()
-    } else {
-        format!(
-            "VR runtimes: {}",
-            vr.installed
-                .iter()
-                .map(|k| k.to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
-    };
-    let blocking = !py_ok || sys.vulkan_icds.is_empty();
+    let mut problems: Vec<String> = Vec::new();
+    match sys.python {
+        Some(p) if !p.supported() => {
+            problems.push(format!("Python {p}: {}", t("wiz.sys.python_old")))
+        }
+        None => problems.push(t("wiz.sys.python_missing").into()),
+        _ => {}
+    }
+    if sys.vulkan_icds.is_empty() {
+        problems.push(t("wiz.sys.vulkan").into());
+    }
+    let blocking = !problems.is_empty();
     rect()
-        .spacing(space::M)
-        .child(title(t("wiz.system.title")))
-        .child(muted(t("wiz.system.body")))
-        .child(check(distro, true, false))
-        .child(check(py, py_ok, false))
-        .child(check(gpu, !sys.vulkan_icds.is_empty(), false))
-        .child(check(runtimes, !vr.installed.is_empty(), true))
+        .width(Size::fill())
+        .cross_align(Alignment::Center)
+        .spacing(space::L)
+        .child(app::logo(112.))
+        .child(centered(display(t("wiz.welcome.title"))))
+        .child(centered(lead(t("wiz.welcome.body"))))
         .children(
-            vr.blockers
-                .iter()
-                .map(|b| muted(format!("· {b}")))
+            problems
+                .into_iter()
+                .enumerate()
+                .map(|(i, p)| {
+                    rect()
+                        .key(i)
+                        .horizontal()
+                        .spacing(space::S)
+                        .cross_align(Alignment::Center)
+                        .child(dot(Tone::Error))
+                        .child(body(p))
+                        .into_element()
+                })
                 .collect::<Vec<_>>(),
         )
-        .child(nav(
-            page,
-            Some(Page::Welcome),
-            Some((Page::Proton, "wiz.next", !blocking)),
-        ))
+        .child(actions(vec![
+            primary(t("wiz.start"))
+                .enabled(!blocking)
+                .on_press(move |_| w.page.set(Page::Proton))
+                .into_element(),
+        ]))
 }
 
-fn proton(ui: Ui, page: State<Page>, mut chosen: State<String>) -> impl IntoElement {
+fn proton_label(id: &str) -> (String, String) {
+    match aasl_components::ProtonId::parse(id) {
+        Ok(p) => (
+            p.tag.clone(),
+            aasl_components::proton::provider(&p.provider)
+                .map(|x| x.title.to_string())
+                .unwrap_or(p.provider),
+        ),
+        Err(_) => (id.to_string(), String::new()),
+    }
+}
+
+fn proton(mut w: Wiz) -> impl IntoElement {
     let cat = svc().catalog_now();
     let recommended = cat.recommended_proton.clone();
     let mut options: Vec<String> = vec![recommended.clone()];
@@ -221,232 +292,336 @@ fn proton(ui: Ui, page: State<Page>, mut chosen: State<String>) -> impl IntoElem
             options.push(v);
         }
     }
-    for r in ui
-        .releases
-        .read()
-        .iter()
-        .filter(|r| r.patches.is_some())
-        .take(4)
-    {
-        let id = r.id.to_string();
-        if !options.contains(&id) {
-            options.push(id);
-        }
-    }
-    let current = chosen.read().clone();
+    let current = w.chosen.read().clone();
     rect()
-        .spacing(space::M)
-        .child(title(t("wiz.proton.title")))
-        .child(muted(t("wiz.proton.body")))
-        .children(
-            options
-                .into_iter()
-                .map(|id| {
-                    let selected = id == current;
-                    let status = aasl_components::ProtonId::parse(&id)
-                        .ok()
-                        .and_then(|p| cat.resolve(&p).first().map(|m| m.status));
-                    let (txt, tone) = match status {
-                        Some(aasl_patches::TargetStatus::Verified) => {
-                            (t("prefs.patch.verified"), Tone::Ok)
-                        }
-                        Some(_) => (t("prefs.patch.untested"), Tone::Warn),
-                        None => (t("prefs.patch.none"), Tone::Error),
-                    };
-                    let id2 = id.clone();
-                    Button::new()
-                        .key(id.clone())
-                        .expanded()
-                        .on_press(move |_| chosen.set(id2.clone()))
-                        .maybe(selected, |b| b.filled())
-                        .maybe(!selected, |b| b.flat())
-                        .child(
-                            rect()
-                                .width(Size::fill())
-                                .horizontal()
-                                .content(Content::Flex)
-                                .cross_align(Alignment::Center)
-                                .spacing(space::S)
-                                .child(rect().width(Size::flex(1.)).child(label().text(id.clone())))
-                                .maybe_child(
-                                    (id == recommended)
-                                        .then(|| chip(t("wiz.proton.recommended"), Tone::Accent)),
-                                )
-                                .child(chip(txt, tone)),
-                        )
-                })
-                .collect::<Vec<_>>(),
+        .width(Size::fill())
+        .cross_align(Alignment::Center)
+        .spacing(space::L)
+        .child(centered(title(t("wiz.proton.title"))))
+        .child(centered(lead(t("wiz.proton.body"))))
+        .child(
+            rect().width(Size::fill()).spacing(space::S).children(
+                options
+                    .into_iter()
+                    .map(|id| {
+                        let selected = id == current;
+                        let (name, provider) = proton_label(&id);
+                        let id2 = id.clone();
+                        let mut chosen = w.chosen;
+                        Button::new()
+                            .key(id.clone())
+                            .expanded()
+                            .flat()
+                            .background(if selected {
+                                alpha(T.accent, 0.12)
+                            } else {
+                                alpha(T.text, 0.04)
+                            })
+                            .border_fill(if selected { T.accent } else { T.border })
+                            .on_press(move |_| chosen.set(id2.clone()))
+                            .child(
+                                rect()
+                                    .width(Size::fill())
+                                    .horizontal()
+                                    .content(Content::Flex)
+                                    .cross_align(Alignment::Center)
+                                    .spacing(space::M)
+                                    .child(
+                                        rect()
+                                            .width(Size::px(16.))
+                                            .height(Size::px(16.))
+                                            .corner_radius(8.)
+                                            .border(
+                                                Border::new()
+                                                    .fill(if selected { T.accent } else { T.muted })
+                                                    .width(2.),
+                                            )
+                                            .center()
+                                            .maybe_child(selected.then(|| {
+                                                rect()
+                                                    .width(Size::px(8.))
+                                                    .height(Size::px(8.))
+                                                    .corner_radius(4.)
+                                                    .background(T.accent)
+                                            })),
+                                    )
+                                    .child(
+                                        rect()
+                                            .width(Size::flex(1.))
+                                            .spacing(2.)
+                                            .child(body(name))
+                                            .child(muted(format!(
+                                                "{provider}, {}",
+                                                t("prefs.patch.verified")
+                                            ))),
+                                    )
+                                    .maybe_child(
+                                        (id == recommended).then(|| {
+                                            chip(t("wiz.proton.recommended"), Tone::Accent)
+                                        }),
+                                    ),
+                            )
+                            .into_element()
+                    })
+                    .collect::<Vec<_>>(),
+            ),
         )
-        .child(nav(
-            page,
-            Some(Page::System),
-            Some((Page::Installer, "wiz.next", true)),
-        ))
+        .child(centered(muted(t("wiz.proton.more"))))
+        .child(actions(vec![
+            link(t("wiz.back"))
+                .on_press(move |_| w.page.set(Page::Welcome))
+                .into_element(),
+            primary(t("wiz.next"))
+                .on_press(move |_| w.page.set(Page::Source))
+                .into_element(),
+        ]))
 }
 
-fn installer(
-    ui: Ui,
-    mut page: State<Page>,
-    path: State<String>,
-    chosen: State<String>,
-) -> impl IntoElement {
-    let raw = path.read().trim().to_string();
-    let p = expand(&raw);
-    let valid = p.is_file() && p.extension().is_some_and(|e| e.eq_ignore_ascii_case("exe"));
+/// Save the Proton choice and run the whole install in the background.
+fn start(mut w: Wiz, exe: Option<PathBuf>) {
+    w.picked.set(exe.clone());
+    w.failed.set(None);
+    w.page.set(Page::Installing);
+    let mut cfg = svc().config();
+    cfg.proton = Some(w.chosen.peek().clone());
+    if let Err(e) = svc().set_config(cfg) {
+        w.ui.notice(Severity::Error, e.to_string());
+    }
+    let opts = InstallOptions {
+        somnium_installer: exe,
+        local_bundle: None,
+        aasl_exe: cli_path(),
+        ..Default::default()
+    };
+    // Window-level task: the button that started it unmounts right away,
+    // and a component task would be cancelled with it.
+    spawn_in_window(async move {
+        let r = tokio::spawn(async move { svc().install(opts).await }).await;
+        let mut ui = w.ui;
+        ui.status.set(svc().status());
+        ui.installed.set(svc().proton_installed());
+        let mut page = w.page;
+        let mut failed = w.failed;
+        match r {
+            Ok(Ok(_)) => page.set(Page::Done),
+            Ok(Err(e)) => failed.set(Some(e.to_string())),
+            Err(e) => failed.set(Some(e.to_string())),
+        }
+    });
+}
+
+fn language_name() -> &'static str {
+    let loc = svc()
+        .config()
+        .locale
+        .or_else(system_locale)
+        .unwrap_or_default();
+    match loc.get(..2) {
+        Some("fr") => "Français",
+        Some("de") => "Deutsch",
+        Some("es") => "Español",
+        Some("ru") => "Русский",
+        Some("ja") => "日本語",
+        _ => "English",
+    }
+}
+
+fn system_locale() -> Option<String> {
+    ["LC_ALL", "LC_MESSAGES", "LANG"]
+        .iter()
+        .filter_map(|k| std::env::var(k).ok())
+        .find(|v| !v.is_empty() && v != "C" && v != "POSIX")
+}
+
+fn source(mut w: Wiz, hover: bool) -> impl IntoElement {
+    let mut failed = w.failed;
+    let error = failed.read().clone();
+    let browse = move |_| {
+        spawn_in_window(async move {
+            let picked = tokio::spawn(async {
+                rfd::AsyncFileDialog::new()
+                    .set_title("SomniumSpaceSetup.exe")
+                    .add_filter("Windows installer", &["exe", "EXE"])
+                    .pick_file()
+                    .await
+                    .map(|h| h.path().to_path_buf())
+            })
+            .await
+            .ok()
+            .flatten();
+            if let Some(p) = picked {
+                if is_exe(&p) {
+                    start(w, Some(p));
+                } else {
+                    failed.set(Some(t("wiz.source.not_exe").into()));
+                }
+            }
+        });
+    };
+    if hover {
+        return rect()
+            .width(Size::fill())
+            .cross_align(Alignment::Center)
+            .spacing(space::M)
+            .padding((space::XXL, 0.))
+            .child(centered(title(t("wiz.source.drop_now")).color(T.accent)))
+            .child(centered(body(t("wiz.source.drop_hint")).color(T.text)));
+    }
     rect()
-        .spacing(space::M)
-        .child(title(t("wiz.installer.title")))
-        .child(muted(t("wiz.installer.body")))
+        .width(Size::fill())
+        .cross_align(Alignment::Center)
+        .spacing(space::L)
+        .child(centered(title(t("wiz.source.title"))))
+        .child(centered(lead(format!(
+            "{} {}.",
+            t("wiz.source.body"),
+            language_name()
+        ))))
+        .child(actions(vec![
+            primary(t("wiz.source.download"))
+                .on_press(move |_| start(w, None))
+                .into_element(),
+        ]))
         .child(
-            Input::new(path)
-                .placeholder(t("wiz.installer.path"))
-                .width(Size::fill()),
+            rect()
+                .width(Size::fill())
+                .height(Size::px(1.))
+                .background(alpha(T.text, 0.1)),
         )
-        .maybe_child((!raw.is_empty() && !valid).then(|| {
-            label()
-                .text(format!("{} ?", p.display()))
-                .font_size(size::SMALL)
-                .color(T.warn)
-        }))
         .child(
             rect()
                 .width(Size::fill())
                 .horizontal()
-                .main_align(Alignment::End)
-                .spacing(space::S)
+                .content(Content::Flex)
+                .cross_align(Alignment::Center)
+                .spacing(space::M)
                 .child(
-                    Button::new()
-                        .flat()
-                        .on_press(move |_| page.set(Page::Proton))
-                        .child(t("wiz.back")),
+                    rect()
+                        .width(Size::flex(1.))
+                        .spacing(2.)
+                        .child(body(t("wiz.source.have")))
+                        .child(muted(t("wiz.source.drop")).color(alpha(T.text, 0.7))),
                 )
                 .child(
                     Button::new()
-                        .filled()
-                        .enabled(valid)
-                        .on_press(move |_| {
-                            let proton = chosen.read().clone();
-                            let exe = expand(path.read().trim());
-                            page.set(Page::Installing);
-                            let mut cfg = svc().config();
-                            cfg.proton = Some(proton);
-                            if let Err(e) = svc().set_config(cfg) {
-                                ui.notice(Severity::Error, e.to_string());
-                            }
-                            let opts = InstallOptions {
-                                somnium_installer: Some(exe),
-                                local_bundle: None,
-                                aasl_exe: cli_path(),
-                            };
-                            ui.run(async move { svc().install(opts).await }, move |_| {
-                                page.set(Page::Done)
-                            });
-                        })
-                        .child(t("wiz.install")),
+                        .corner_radius(RADIUS_PILL)
+                        .on_press(browse)
+                        .child(t("wiz.source.browse")),
                 ),
         )
+        .maybe_child(error.map(|e| centered(body(e).color(T.error))))
+        .child(actions(vec![
+            link(t("wiz.back"))
+                .on_press(move |_| w.page.set(Page::Proton))
+                .into_element(),
+        ]))
 }
 
-fn installing(ui: Ui, mut page: State<Page>) -> impl IntoElement {
+/// Secondary copy on the sheet: body size, bright enough to read.
+fn lead(text: impl Into<String>) -> Label {
+    body(text).color(alpha(T.text, 0.78))
+}
+
+fn installing(mut w: Wiz, phrase: usize) -> impl IntoElement {
+    let ui = w.ui;
     let done = ui.done_steps.read().clone();
     let current = ui.step.read().clone();
     let progress = ui.progress.read().clone();
-    let failed = ui.error.read().is_some() && ui.status.read().operation.is_none();
+    let error = w.failed.read().clone();
+    let finished = done.iter().filter(|d| STEPS.contains(&d.as_str())).count();
+    let sub = progress
+        .as_ref()
+        .and_then(|(_, d, tot)| percent(*d, *tot))
+        .unwrap_or(0.)
+        / 100.;
+    let overall = ((finished as f32 + sub.min(0.95)) / STEPS.len() as f32 * 100.).min(100.);
+    let index = current
+        .as_deref()
+        .and_then(|c| STEPS.iter().position(|s| *s == c))
+        .map(|i| i + 1)
+        .unwrap_or(finished.max(1));
+    let heading = current
+        .as_deref()
+        .map(step)
+        .unwrap_or_else(|| t("wiz.installing.title").to_string());
+    if let Some(e) = error {
+        return rect()
+            .width(Size::fill())
+            .cross_align(Alignment::Center)
+            .spacing(space::L)
+            .child(centered(title(t("wiz.failed.title"))))
+            .child(centered(body(e).color(T.error)))
+            .child(centered(muted(t("wiz.failed.hint"))))
+            .child(actions(vec![
+                link(t("wiz.back"))
+                    .on_press(move |_| {
+                        w.failed.set(None);
+                        w.page.set(Page::Source)
+                    })
+                    .into_element(),
+                primary(t("wiz.failed.retry"))
+                    .on_press(move |_| {
+                        let exe = w.picked.peek().clone();
+                        start(w, exe)
+                    })
+                    .into_element(),
+            ]));
+    }
+    let detail = progress
+        .as_ref()
+        .map(|(task, d, tot)| match percent(*d, *tot) {
+            Some(p) => format!("{task}  {p:.0} %"),
+            None => format!("{task}  {:.0} MB", *d as f64 / 1e6),
+        });
     rect()
-        .spacing(space::S)
-        .child(title(t("wiz.installing.title")))
-        .children(
-            STEPS
-                .iter()
-                .map(|s| {
-                    let (dot, color) = if done.iter().any(|d| d == s) {
-                        ("●", T.ok)
-                    } else if current.as_deref() == Some(*s) {
-                        ("◐", T.accent)
-                    } else {
-                        ("○", T.muted)
-                    };
-                    rect()
-                        .key(*s)
-                        .horizontal()
-                        .spacing(space::M)
-                        .child(label().text(dot).color(color))
-                        .child(label().text(step(s)).color(if color == T.muted {
-                            T.muted
-                        } else {
-                            T.text
-                        }))
-                })
-                .collect::<Vec<_>>(),
-        )
-        .maybe_child(progress.map(|(task, d, total)| {
-            let pct = total
-                .filter(|t| *t > 0)
-                .map(|t| d as f32 * 100. / t as f32)
-                .unwrap_or(0.);
-            rect()
-                .width(Size::fill())
-                .spacing(2.)
-                .child(muted(task))
-                .child(ProgressBar::new(pct).width(Size::fill()))
-        }))
-        .children(
-            ui.notices
-                .read()
-                .iter()
-                .rev()
-                .take(3)
-                .map(|(sev, m)| {
-                    label()
-                        .text(m.clone())
-                        .font_size(size::SMALL)
-                        .color(crate::widgets::severity_tone(*sev).color())
-                })
-                .collect::<Vec<_>>(),
-        )
-        .maybe_child(failed.then(|| {
-            rect()
-                .horizontal()
-                .main_align(Alignment::End)
-                .width(Size::fill())
-                .child(
-                    Button::new()
-                        .on_press(move |_| page.set(Page::Installer))
-                        .child(t("wiz.back")),
-                )
-        }))
-}
-
-fn done(mut ui: Ui) -> impl IntoElement {
-    rect()
-        .spacing(space::M)
-        .child(title(t("wiz.done.title")))
-        .child(body(t("wiz.done.body")))
+        .width(Size::fill())
+        .cross_align(Alignment::Center)
+        .spacing(space::L)
+        .child(crate::loader::OrbitLoader)
+        .child(centered(title(heading)))
+        .child(centered(lead(t(&format!("load.{}", phrase % PHRASES)))))
         .child(
             rect()
-                .width(Size::fill())
-                .horizontal()
-                .main_align(Alignment::End)
+                .width(Size::px(420.))
+                .spacing(space::S)
                 .child(
-                    Button::new()
-                        .filled()
-                        .on_press(move |_| ui.screen.set(Screen::Launcher))
-                        .child(t("wiz.done.go")),
+                    ProgressBar::new(overall)
+                        .show_progress(false)
+                        .width(Size::fill()),
+                )
+                .child(
+                    rect()
+                        .width(Size::fill())
+                        .horizontal()
+                        .main_align(Alignment::SpaceBetween)
+                        .child(muted(detail.unwrap_or_default()))
+                        .child(muted(format!(
+                            "{} {index} / {}",
+                            t("wiz.installing.step"),
+                            STEPS.len()
+                        ))),
                 ),
         )
+        .child(centered(muted(t("wiz.installing.hint"))))
 }
 
-pub fn expand(p: &str) -> std::path::PathBuf {
-    let p = p.trim_matches(|c| c == '\'' || c == '"');
-    let p = p.strip_prefix("file://").unwrap_or(p);
-    match p.strip_prefix("~/") {
-        Some(rest) => svc().paths().home.join(rest),
-        None => p.into(),
-    }
+fn done(mut w: Wiz) -> impl IntoElement {
+    rect()
+        .width(Size::fill())
+        .cross_align(Alignment::Center)
+        .spacing(space::L)
+        .child(app::logo(112.))
+        .child(centered(display(t("wiz.done.title"))))
+        .child(centered(lead(t("wiz.done.body"))))
+        .child(actions(vec![
+            primary(t("wiz.done.go"))
+                .on_press(move |_| w.ui.screen.set(Screen::Launcher))
+                .into_element(),
+        ]))
 }
 
 /// The desktop entry should start the `aasl` CLI that sits next to us.
-pub fn cli_path() -> Option<std::path::PathBuf> {
+pub fn cli_path() -> Option<PathBuf> {
     let me = std::env::current_exe().ok()?;
     let cli = me.with_file_name("aasl");
     Some(if cli.exists() { cli } else { me })
