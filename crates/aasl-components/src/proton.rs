@@ -87,6 +87,17 @@ pub const PROVIDERS: &[Provider] = &[
         }],
     },
     Provider {
+        id: "rtsp",
+        title: "GE-Proton RTSP",
+        description: "GE-Proton with RTSP and extra media patches, useful for video streams in VR worlds.",
+        repo: "SpookySkeletons/proton-rtsp",
+        variants: &[Variant {
+            id: "x86-64",
+            template: "$tag",
+            min_level: CpuLevel::X86_64,
+        }],
+    },
+    Provider {
         id: "cachyos",
         title: "Proton-CachyOS",
         description: "CachyOS's Proton, built with newer compilers and optional x86-64-v3 optimisations.",
@@ -104,7 +115,43 @@ pub const PROVIDERS: &[Provider] = &[
             },
         ],
     },
+    Provider {
+        id: "em",
+        title: "Proton-EM",
+        description: "Proton with HDR, Wayland and newer DXVK/VKD3D work by Etaash Mathamsetty.",
+        repo: "BananaWorks07/Proton",
+        variants: &[Variant {
+            id: "x86-64",
+            template: "proton-$tag",
+            min_level: CpuLevel::X86_64,
+        }],
+    },
+    Provider {
+        id: "sarek",
+        title: "Proton-Sarek",
+        description: "Proton tuned for older GPUs (DXVK for Vulkan 1.1 and earlier).",
+        repo: "pythonlover02/Proton-Sarek",
+        variants: &[Variant {
+            id: "x86-64",
+            template: "$tag",
+            min_level: CpuLevel::X86_64,
+        }],
+    },
 ];
+
+const ARCHIVE_EXTS: [&str; 3] = [".tar.gz", ".tar.xz", ".tar.zst"];
+
+/// Last resort when no template matches (a provider renamed its assets):
+/// the first x86-64 archive, like ProtonPlus's position-based pick.
+fn fallback_asset(assets: &[Asset]) -> Option<&Asset> {
+    assets.iter().find(|a| {
+        let n = a.name.to_ascii_lowercase();
+        ARCHIVE_EXTS.iter().any(|e| n.ends_with(e))
+            && !["aarch64", "arm64", "debug", "-src", "source"]
+                .iter()
+                .any(|bad| n.contains(bad))
+    })
+}
 
 pub fn provider(id: &str) -> Option<&'static Provider> {
     PROVIDERS.iter().find(|p| p.id == id)
@@ -195,7 +242,7 @@ impl Release {
         for v in p.variants.iter().filter(|v| v.min_level <= level) {
             let stem = v.template.replace("$tag", &self.tag);
             let archive = self.assets.iter().find(|a| {
-                [".tar.gz", ".tar.xz", ".tar.zst"]
+                ARCHIVE_EXTS
                     .iter()
                     .any(|ext| a.name == format!("{stem}{ext}"))
             });
@@ -207,7 +254,11 @@ impl Release {
                 return Some((*v, a, sum));
             }
         }
-        None
+        let v = p
+            .variants
+            .iter()
+            .find(|v| v.min_level == CpuLevel::X86_64)?;
+        fallback_asset(&self.assets).map(|a| (*v, a, None))
     }
 }
 
@@ -330,7 +381,7 @@ impl ProtonManager {
         {
             return Ok(c.releases.clone());
         }
-        let url = format!("{}/repos/{}/releases?per_page=30", self.api_base, p.repo);
+        let url = format!("{}/repos/{}/releases?per_page=50", self.api_base, p.repo);
         let mut req = self
             .downloader
             .client()
