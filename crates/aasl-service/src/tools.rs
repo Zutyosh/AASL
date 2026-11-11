@@ -415,3 +415,162 @@ impl Service {
         aasl_patches::bundle::restore(&aasl_install::proton_dir(&self.inner.paths, &id))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use aasl_components::ProtonId;
+    use aasl_components::proton::InstalledProton;
+    use aasl_core::Paths;
+    use aasl_patches::Catalog;
+    use aasl_patches::builder::Engine;
+    use aasl_system::FakeHost;
+
+    use crate::Service;
+
+    fn svc_with(home: &std::path::Path, host: FakeHost) -> Service {
+        let h = home.display().to_string();
+        let paths = Paths::resolve(|k| (k == "HOME").then(|| h.clone())).unwrap();
+        let s = Service::builder(paths)
+            .host(Arc::new(host))
+            .log_file(false)
+            .build()
+            .unwrap();
+        // Never reach the network for the catalog.
+        *s.inner.catalog.lock().unwrap() = Some(Catalog::embedded());
+        s
+    }
+
+    fn svc(home: &std::path::Path) -> Service {
+        svc_with(home, FakeHost::new())
+    }
+
+    /// What a finished download leaves on disk.
+    fn fake_install(s: &Service, id: &ProtonId) {
+        let dir = s.manager().dir_for(id);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("proton"), "#!/bin/sh\n").unwrap();
+        let rec = InstalledProton {
+            id: id.clone(),
+            variant: "x86_64".into(),
+            asset: format!("{}.tar.gz", id.tag),
+            installed_at: 1,
+            path: dir.clone(),
+        };
+        std::fs::write(
+            dir.join(".aasl-proton.json"),
+            serde_json::to_vec(&rec).unwrap(),
+        )
+        .unwrap();
+    }
+
+    fn record_state(s: &Service, proton: &str) {
+        let file = s.paths().state_file();
+        let mut st = aasl_install::InstallState::load(&file).unwrap_or_default();
+        st.proton = Some(proton.into());
+        st.save(&file).unwrap();
+    }
+
+    #[tokio::test]
+    async fn current_proton_prefers_the_install_record() {
+        let d = tempfile::tempdir().unwrap();
+        let s = svc(d.path());
+        assert_eq!(s.current_proton(), None);
+        let mut cfg = s.config();
+        cfg.proton = Some("ge:GE-Proton10-1".into());
+        s.set_config(cfg).unwrap();
+        assert_eq!(
+            s.current_proton(),
+            Some(ProtonId::new("ge", "GE-Proton10-1"))
+        );
+        // Schema 1 stored a bare GE tag.
+        record_state(&s, "GE-Proton9-27");
+        assert_eq!(
+            s.current_proton(),
+            Some(ProtonId::new("ge", "GE-Proton9-27"))
+        );
+    }
+
+    #[tokio::test]
+    async fn installed_list_and_remove_guards() {
+        let d = tempfile::tempdir().unwrap();
+        let s = svc(d.path());
+        let used = ProtonId::new("ge", "GE-Proton10-1");
+        let spare = ProtonId::new("ge", "GE-Proton9-27");
+        fake_install(&s, &used);
+        fake_install(&s, &spare);
+        // A folder AASL did not install is not listed and not removable.
+        let foreign = ProtonId::new("ge", "Custom");
+        std::fs::create_dir_all(s.manager().dir_for(&foreign)).unwrap();
+        record_state(&s, &used.to_string());
+
+        let list = s.proton_installed();
+        assert_eq!(list.len(), 2, "{list:?}");
+        assert!(list.iter().any(|p| p.proton.id == used && p.in_use));
+        assert!(list.iter().any(|p| p.proton.id == spare && !p.in_use));
+
+        let err = s.proton_remove(&used).unwrap_err().to_string();
+        assert!(err.contains("Switch to another one"), "{err}");
+        assert!(s.manager().is_installed(&used));
+        assert!(s.proton_remove(&foreign).is_err());
+        assert!(s.manager().dir_for(&foreign).is_dir(), "left alone");
+
+        s.proton_remove(&spare).unwrap();
+        assert!(!s.manager().dir_for(&spare).exists());
+        assert_eq!(s.proton_installed().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn proton_use_records_the_choice_before_install() {
+        let d = tempfile::tempdir().unwrap();
+        let s = svc(d.path());
+        let id = ProtonId::new("ge", "GE-Proton10-1");
+        s.proton_use(id.clone(), true).await.unwrap();
+        assert_eq!(s.config().proton.as_deref(), Some("ge:GE-Proton10-1"));
+        assert_eq!(s.current_proton(), Some(id));
+        assert!(
+            !s.status().installed,
+            "nothing to repair before the first install"
+        );
+    }
+
+    #[tokio::test]
+    async fn proton_use_respects_a_pinned_recipe() {
+        let d = tempfile::tempdir().unwrap();
+        let s = svc(d.path());
+        let pinned = "format = 1\nid = \"pinned\"\ntitle = \"Pinned\"\nproton = \"ge:GE-Proton10-1\"\ningredients = [\"ytdlp-android-client\"]\n";
+        s.recipe_import(pinned).unwrap();
+        let mut cfg = s.config();
+        cfg.recipe = Some("pinned".into());
+        s.set_config(cfg).unwrap();
+
+        let other = ProtonId::new("ge", "GE-Proton9-27");
+        let err = s.proton_use(other, true).await.unwrap_err().to_string();
+        assert!(err.contains("pins ge:GE-Proton10-1"), "{err}");
+        assert_eq!(s.config().proton, None, "nothing recorded");
+
+        s.proton_use(ProtonId::new("ge", "GE-Proton10-1"), true)
+            .await
+            .unwrap();
+        assert_eq!(s.config().proton.as_deref(), Some("ge:GE-Proton10-1"));
+    }
+
+    #[tokio::test]
+    async fn patch_builder_order() {
+        let d = tempfile::tempdir().unwrap();
+        let none = svc(d.path());
+        assert!(none.patch_builder().is_none());
+        let host = |files: &[&str]| {
+            files
+                .iter()
+                .fold(FakeHost::new(), |h, f| h.with_file(f, ""))
+        };
+        let both = svc_with(d.path(), host(&["/usr/bin/docker", "/usr/bin/podman"]));
+        assert!(matches!(both.patch_builder(), Some(Engine::Podman)));
+        let docker = svc_with(d.path(), host(&["/usr/bin/docker"]));
+        assert!(matches!(docker.patch_builder(), Some(Engine::Docker)));
+        let mingw = svc_with(d.path(), host(&["/usr/bin/x86_64-w64-mingw32-gcc"]));
+        assert!(matches!(mingw.patch_builder(), Some(Engine::Host)));
+    }
+}

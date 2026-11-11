@@ -519,6 +519,78 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn session_timeline_crash_and_delete() {
+        let d = tempfile::tempdir().unwrap();
+        let h = d.path().display().to_string();
+        let paths = Paths::resolve(|k| (k == "HOME").then(|| h.clone())).unwrap();
+        let s = Service::builder(paths)
+            .host(Arc::new(
+                aasl_system::FakeHost::new().with_file("/usr/bin/mangohud", ""),
+            ))
+            .log_file(false)
+            .build()
+            .unwrap();
+        let mut cfg = s.config();
+        cfg.proton = Some("ge:GE-Proton10-1".into());
+        s.set_config(cfg).unwrap();
+        let mut env = std::collections::BTreeMap::new();
+        s.start_session(&mut env);
+        assert_eq!(env.get("MANGOHUD").map(String::as_str), Some("1"));
+        let data = s.game_data_dir();
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::write(data.join("Player.log"), "Renderer: Test GPU (ID=0x1)\n").unwrap();
+        // Wine's crash dialog, outside Unity's handler.
+        std::fs::create_dir_all(s.paths().logs_dir()).unwrap();
+        std::fs::write(
+            s.paths().logs_dir().join("somnium.log"),
+            "wine: Unhandled exception 0xc0000005\n",
+        )
+        .unwrap();
+        let mut csv = String::from("fps,frametime,cpu_load,gpu_load\n");
+        for i in 0..3000 {
+            let ft = if i % 500 == 250 { 200.0 } else { 11.0 };
+            csv.push_str(&format!("{},{ft},30,60\n", 1000.0 / ft));
+        }
+        std::fs::create_dir_all(s.paths().state_dir.join("mangohud")).unwrap();
+        std::fs::write(
+            s.paths()
+                .state_dir
+                .join("mangohud")
+                .join("Somnium Space VR_2025.csv"),
+            csv,
+        )
+        .unwrap();
+
+        let saved = s.record_session(Some(1)).unwrap();
+        assert_eq!(
+            saved.report.crash,
+            Some(aasl_patches::community::Crash::InGame)
+        );
+        let perf = saved.report.perf.as_ref().expect("perf from MangoHud");
+        assert_eq!(perf.hitches.as_ref().map(|h| h.count), Some(6), "{perf:?}");
+        let tl = s.session_timeline(&saved.id).expect("timeline saved");
+        assert!(tl.has_load && tl.points.iter().map(|p| p.hitches).sum::<u32>() == 6);
+        assert!(
+            s.paths()
+                .state_dir
+                .join("sessions")
+                .join("last-mangohud.csv")
+                .is_file()
+        );
+        assert!(
+            !s.paths().state_dir.join("mangohud").exists(),
+            "raw logs cleaned up"
+        );
+
+        for bad in ["../config", "a/b", "nope"] {
+            assert!(s.session_delete(bad).is_err(), "{bad}");
+        }
+        s.session_delete(&saved.id).unwrap();
+        assert!(s.sessions().is_empty());
+        assert!(s.session_timeline(&saved.id).is_none());
+    }
+
+    #[tokio::test]
     async fn recipes_save_import_export_and_guards() {
         let d = tempfile::tempdir().unwrap();
         let s = svc(d.path());
