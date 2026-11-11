@@ -6,10 +6,16 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
+mod recipes;
+mod sessions;
 mod tools;
 mod update;
 
-pub use tools::{InstalledView, ReleaseView};
+pub use aasl_patches::Source as PatchSource;
+pub use aasl_patches::{Library, Recipe};
+pub use recipes::RecipeInfo;
+pub use sessions::{SavedReport, Share};
+pub use tools::{InstalledView, PatchFile, ReleaseView};
 pub use update::UpdateInfo;
 
 use aasl_components::{CpuLevel, Downloader, Sources};
@@ -34,6 +40,8 @@ pub struct Status {
     pub installed: bool,
     pub prefix: PathBuf,
     pub proton: Option<String>,
+    /// Compatibility recipe in use.
+    pub recipe: String,
     pub operation: Option<String>,
     pub session_pid: Option<u32>,
     pub runtime: Option<OpenXrRuntime>,
@@ -189,12 +197,20 @@ impl Service {
             }),
             cpu: self.inner.cpu,
             aasl_version: env!("CARGO_PKG_VERSION"),
-            installed: self
-                .prefix()
-                .join(aasl_components::sources::LAUNCHER_REL_PATH)
-                .exists(),
+            // Somnium in the prefix is not enough: after `aasl uninstall`
+            // the prefix stays but umu-run, Proton and the record are gone,
+            // so the setup has to run again (it skips Somnium's installer).
+            installed: state.installed_at.is_some()
+                && self
+                    .prefix()
+                    .join(aasl_components::sources::LAUNCHER_REL_PATH)
+                    .exists(),
             prefix: self.prefix(),
             proton: state.proton.clone(),
+            recipe: self
+                .config()
+                .recipe
+                .unwrap_or_else(|| aasl_patches::recipe::DEFAULT_RECIPE.into()),
             operation: self.inner.op_name.lock().unwrap().clone(),
             session_pid: *self.inner.session.lock().unwrap(),
             runtime: aasl_system::active_runtime(self.inner.host.as_ref()),
@@ -264,17 +280,19 @@ impl Service {
         }
     }
 
-    pub async fn install(&self, opts: Options) -> Result<InstallState> {
+    pub async fn install(&self, mut opts: Options) -> Result<InstallState> {
+        opts.recipe = opts.recipe.or_else(|| self.active_plan().ok());
         self.exclusive("install", self.installer().run(Mode::Install, &opts))
             .await
     }
 
     pub async fn repair(&self) -> Result<InstallState> {
-        self.exclusive(
-            "repair",
-            self.installer().run(Mode::Repair, &Options::default()),
-        )
-        .await
+        let opts = Options {
+            recipe: self.active_plan().ok(),
+            ..Default::default()
+        };
+        self.exclusive("repair", self.installer().run(Mode::Repair, &opts))
+            .await
     }
 
     pub async fn uninstall(&self, remove_prefix: bool) -> Result<Vec<PathBuf>> {
@@ -286,9 +304,17 @@ impl Service {
 
     /// Start Somnium. Returns its pid; a background task records the exit.
     pub async fn launch(&self, opts: LaunchOptions) -> Result<u32> {
+        // The recipe's environment first; the user's own config.env wins.
+        let mut config = self.config();
+        if let Ok(plan) = self.active_plan() {
+            let mut env = plan.env();
+            env.extend(std::mem::take(&mut config.env));
+            config.env = env;
+        }
+        self.start_session(&mut config.env);
         let launcher = Launcher {
             paths: self.inner.paths.clone(),
-            config: self.config(),
+            config,
             host: self.inner.host.clone(),
             events: self.inner.events.clone(),
             cancel: self.inner.cancel.clone(),
@@ -296,11 +322,16 @@ impl Service {
         let mut child = self.exclusive("launch", launcher.launch(&opts)).await?;
         let pid = child.id().unwrap_or_default();
         *self.inner.session.lock().unwrap() = Some(pid);
-        let inner = self.inner.clone();
+        let svc = self.clone();
         tokio::spawn(async move {
             let code = child.wait().await.ok().and_then(|s| s.code());
-            let _ = inner.events.send(Event::ProcessExited { pid, code });
-            *inner.session.lock().unwrap() = None;
+            let _ = svc.inner.events.send(Event::ProcessExited { pid, code });
+            *svc.inner.session.lock().unwrap() = None;
+            if svc.config().session_reports
+                && let Err(e) = svc.record_session(code)
+            {
+                svc.notice(Severity::Warn, format!("No session report: {e}"));
+            }
         });
         Ok(pid)
     }
@@ -439,6 +470,97 @@ mod tests {
             .log_file(false)
             .build()
             .unwrap()
+    }
+
+    #[tokio::test]
+    async fn session_report_verdict_and_share() {
+        let d = tempfile::tempdir().unwrap();
+        let s = svc(d.path());
+        assert!(s.record_session(None).is_err(), "nothing launched yet");
+        let mut cfg = s.config();
+        cfg.proton = Some("ge:GE-Proton11-12".into());
+        s.set_config(cfg).unwrap();
+        let mut env = std::collections::BTreeMap::new();
+        s.start_session(&mut env);
+        assert!(
+            !env.contains_key("MANGOHUD"),
+            "no mangohud on the fake host"
+        );
+        let data = s.game_data_dir();
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::write(
+            data.join("Player.log"),
+            "Renderer: Test GPU (ID=0x1)\n[XR] [1] Available Layers: (0)\n[World Transition]: Transition scene unloaded: IN_WORLD, False\n[AVProVideo] Opening rtsp://x\n",
+        )
+        .unwrap();
+        let saved = s.record_session(Some(0)).unwrap();
+        let r = &saved.report;
+        assert_eq!((r.worlds, r.video.opened, r.flat), (1, 1, false));
+        assert_eq!(r.hardware.gpu, "Test GPU");
+        assert_eq!(r.recipe.id, "recommended");
+        let plan = s.active_plan().unwrap();
+        let id = aasl_components::ProtonId::new("ge", "GE-Proton11-12");
+        assert_eq!(r.recipe.key, plan.bundle_key(&id));
+        assert_eq!(s.sessions().len(), 1);
+        let v = s.recipe_verdict("recommended").unwrap();
+        assert_eq!(
+            v.reports, 0,
+            "a session under 5 minutes proves nothing yet: {v:?}"
+        );
+        let share = s.recipe_share("recommended", &[]).unwrap();
+        assert!(
+            share
+                .url
+                .starts_with("https://github.com/Zutyosh/AASL/issues/new?template=recipe.yml")
+        );
+        assert!(share.reports.contains("\"worlds\":1"));
+        assert!(share.recipe.contains("tls-client-certs") && !share.recipe.contains("content ="));
+    }
+
+    #[tokio::test]
+    async fn recipes_save_import_export_and_guards() {
+        let d = tempfile::tempdir().unwrap();
+        let s = svc(d.path());
+        let list = s.recipes().unwrap();
+        assert!(
+            list.iter()
+                .any(|r| r.id == "recommended" && r.builtin && r.active)
+        );
+        assert_eq!(s.active_plan().unwrap().recipe.id, "recommended");
+
+        let env_only = "format = 1\nid = \"flat-yt\"\ntitle = \"Env only\"\ningredients = [\"ytdlp-android-client\"]\n";
+        let info = s.recipe_import(env_only).unwrap();
+        assert!(!info.needs_build && !info.custom_code && !info.builtin);
+        assert!(d.path().join(".config/aasl/recipes/flat-yt.toml").is_file());
+
+        let mut cfg = s.config();
+        cfg.recipe = Some("flat-yt".into());
+        s.set_config(cfg).unwrap();
+        let plan = s.active_plan().unwrap();
+        assert_eq!(
+            plan.env()["PROTON_YTDLP_EXTRACTOR_ARGS"],
+            "youtube:player_client=android"
+        );
+        let id = aasl_components::ProtonId::new("ge", "GE-Proton11-12");
+        assert_eq!(s.bundle_source(&plan, &id), PatchSource::NotNeeded);
+        assert!(
+            s.recipe_delete("flat-yt").is_err(),
+            "the active recipe stays"
+        );
+
+        let exported = s.recipe_export("recommended").unwrap();
+        let mut copy = s.library().unwrap().import(&exported).unwrap();
+        assert!(s.recipe_save(&copy).is_err(), "built-in ids are read-only");
+        copy.id = "mine".into();
+        s.recipe_save(&copy).unwrap();
+        assert!(
+            s.recipes()
+                .unwrap()
+                .iter()
+                .any(|r| r.id == "mine" && r.needs_build)
+        );
+        s.recipe_delete("mine").unwrap();
+        assert!(s.recipe("mine").is_err());
     }
 
     #[tokio::test]
