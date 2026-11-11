@@ -231,11 +231,21 @@ impl Service {
                         p.file_name()
                             .is_some_and(|n| n.to_string_lossy().starts_with("Somnium Space VR"))
                     })
-                    .filter_map(|p| std::fs::read_to_string(p).ok())
-                    .filter_map(|t| community::parse_mangohud(&t))
-                    .max_by_key(|p| p.frames)
+                    .filter_map(|p| std::fs::read_to_string(&p).ok().map(|t| (p, t)))
+                    .filter_map(|(p, t)| Some((p, community::parse_mangohud(&t)?)))
+                    .max_by_key(|(_, perf)| perf.frames)
             })
             .flatten();
+        // Keep the frame log of the last session for a closer look.
+        if let Some((csv, _)) = &perf {
+            let _ = std::fs::create_dir_all(self.sessions_dir());
+            let _ = std::fs::copy(csv, self.sessions_dir().join("last-mangohud.csv"));
+        }
+        let timeline = perf
+            .as_ref()
+            .and_then(|(csv, _)| std::fs::read_to_string(csv).ok())
+            .and_then(|t| aasl_patches::timeline::from_mangohud(&t));
+        let perf = perf.map(|(_, p)| p);
         let report = SessionReport {
             format: REPORT_FORMAT,
             aasl_version: env!("CARGO_PKG_VERSION").into(),
@@ -260,6 +270,11 @@ impl Service {
             serde_json::to_string_pretty(&report).map_err(|e| Error::Invalid(e.to_string()))?;
         std::fs::write(dir.join(format!("{id}.json")), json)
             .map_err(|e| Error::io("saving the report", e))?;
+        if let Some(t) = timeline
+            && let Ok(text) = serde_json::to_string(&t)
+        {
+            let _ = std::fs::write(dir.join(format!("{id}.timeline")), text);
+        }
         let _ = std::fs::remove_file(self.pending_file());
         let _ = std::fs::remove_dir_all(self.mangohud_dir());
         self.notice(
@@ -297,6 +312,29 @@ impl Service {
             .collect();
         out.sort_by_key(|s| std::cmp::Reverse(s.report.started_at));
         out
+    }
+
+    /// The session over time, when MangoHud was recording.
+    pub fn session_timeline(&self, id: &str) -> Option<aasl_patches::timeline::Timeline> {
+        let text =
+            std::fs::read_to_string(self.sessions_dir().join(format!("{id}.timeline"))).ok()?;
+        serde_json::from_str(&text).ok()
+    }
+
+    /// Forget a saved session (its report and its timeline).
+    pub fn session_delete(&self, id: &str) -> Result<()> {
+        if id.contains(['/', '\\']) || id.contains("..") {
+            return Err(Error::Invalid(format!("{id} is not a session")));
+        }
+        let dir = self.sessions_dir();
+        let report = dir.join(format!("{id}.json"));
+        if !report.is_file() {
+            return Err(Error::Invalid(format!("no session {id}")));
+        }
+        std::fs::remove_file(&report)
+            .map_err(|e| Error::io(format!("removing {}", report.display()), e))?;
+        let _ = std::fs::remove_file(dir.join(format!("{id}.timeline")));
+        Ok(())
     }
 
     /// How a recipe stands on this machine's own reports, with the rules
