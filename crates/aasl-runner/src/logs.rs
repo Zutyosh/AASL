@@ -79,6 +79,7 @@ impl LogBuffer {
                 }
                 None => None,
             };
+            let mut last_progress: Option<(String, u64)> = None;
             loop {
                 let ev = match rx.recv().await {
                     Ok(ev) => ev,
@@ -88,6 +89,16 @@ impl LogBuffer {
                     }
                     Err(_) => break,
                 };
+                if let Event::Progress { task, done, total } = &ev {
+                    let step = progress_step(*done, *total);
+                    if last_progress
+                        .as_ref()
+                        .is_some_and(|(t, s)| t == task && *s == step)
+                    {
+                        continue;
+                    }
+                    last_progress = Some((task.clone(), step));
+                }
                 let (source, line) = match ev {
                     Event::Log { source, line } => (source, line),
                     other => (LogSource::Aasl, describe(&other)),
@@ -103,6 +114,15 @@ impl LogBuffer {
                 buf.push(source, line);
             }
         })
+    }
+}
+
+/// Progress events arrive per chunk; the log keeps one line per 10 % (or
+/// per 50 MB when the size is unknown).
+fn progress_step(done: u64, total: Option<u64>) -> u64 {
+    match total {
+        Some(t) if t > 0 => done * 10 / t,
+        _ => done / 50_000_000,
     }
 }
 
@@ -129,8 +149,8 @@ fn describe(e: &Event) -> String {
             if *skipped { "already done" } else { "done" }
         ),
         Event::Progress { task, done, total } => match total {
-            Some(t) if *t > 0 => format!("{task}: {}%", done * 100 / t),
-            _ => format!("{task}: {done} bytes"),
+            Some(t) if *t > 0 => format!("{task}: {}%", done * 10 / t * 10),
+            _ => format!("{task}: {} MB", done / 1_000_000),
         },
         Event::ProcessStarted { pid, command } => format!("started pid {pid}: {command}"),
         Event::ProcessExited { pid, code } => format!("pid {pid} exited with {code:?}"),
@@ -156,6 +176,27 @@ mod tests {
         );
         assert_eq!(b.tail(Some(4), 10).len(), 1);
         assert_eq!(b.tail(None, 1)[0].line, "4");
+    }
+
+    #[tokio::test]
+    async fn progress_is_logged_per_ten_percent() {
+        let ev = aasl_core::event_bus();
+        let b = LogBuffer::new(1000);
+        b.attach(&ev, None);
+        tokio::task::yield_now().await;
+        for done in 0..=100 {
+            ev.send(Event::Progress {
+                task: "dl".into(),
+                done,
+                total: Some(100),
+            })
+            .unwrap();
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let lines: Vec<String> = b.tail(None, 1000).into_iter().map(|l| l.line).collect();
+        assert_eq!(lines.len(), 11);
+        assert_eq!(lines[0], "dl: 0%");
+        assert_eq!(lines[10], "dl: 100%");
     }
 
     #[tokio::test]
