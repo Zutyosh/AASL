@@ -8,5 +8,5 @@
 pub mod mcp;
 pub mod transport;
 
-pub use mcp::{ConfirmHook, Server};
+pub use mcp::{ConfirmHook, Server, ToolInfo, tools};
 pub use transport::{proxy_stdio_to_socket, serve_socket, serve_stdio};

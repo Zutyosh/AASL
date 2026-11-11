@@ -273,6 +273,27 @@ const TOOLS: &[ToolDef] = &[
     },
 ];
 
+/// What an agent can call, for the GUI to list.
+pub struct ToolInfo {
+    pub name: &'static str,
+    pub description: &'static str,
+    pub read_only: bool,
+    /// Asks the person at the GUI first.
+    pub needs_approval: bool,
+}
+
+pub fn tools() -> Vec<ToolInfo> {
+    TOOLS
+        .iter()
+        .map(|t| ToolInfo {
+            name: t.name,
+            description: t.description,
+            read_only: t.read_only,
+            needs_approval: t.destructive,
+        })
+        .collect()
+}
+
 const RESOURCES: &[(&str, &str, &str)] = &[
     ("aasl://config", "config.toml", "AASL configuration"),
     (
