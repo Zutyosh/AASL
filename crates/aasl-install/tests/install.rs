@@ -55,6 +55,8 @@ impl Exec for FakeUmu {
             match spec.args.first().map(String::as_str) {
                 Some("wineboot") => std::fs::write(prefix.join("system.reg"), "").unwrap(),
                 Some(exe) if exe.ends_with(".exe") => {
+                    assert!(spec.args.iter().any(|a| a == "/VERYSILENT"));
+                    assert!(spec.args.iter().any(|a| a.starts_with("/LANG=")));
                     let l = prefix.join(LAUNCHER_REL_PATH);
                     std::fs::create_dir_all(l.parent().unwrap()).unwrap();
                     std::fs::write(l, "MZ").unwrap();
@@ -100,6 +102,7 @@ async fn server() -> MockServer {
         ("/umu/1.4.4/umu-launcher-1.4.4-zipapp.tar", umu),
         ("/dl/ge.tar.gz", proton),
         ("/dl/bundle.tar.gz", bundle),
+        ("/somnium.exe", b"MZ fake installer".to_vec()),
     ] {
         Mock::given(path(p)).respond_with(ok(body)).mount(&s).await;
     }
@@ -124,6 +127,7 @@ fn installer(home: &Path, uri: &str, umu_sha: String) -> Installer {
             umu_version: "1.4.4".into(),
             umu_sha256: umu_sha,
             github_api: format!("{uri}/api"),
+            somnium_installer_url: format!("{uri}/somnium.exe"),
         },
         host: Arc::new(host),
         exec: Arc::new(FakeUmu),
@@ -146,12 +150,14 @@ async fn install_then_repair_then_uninstall() {
     let exe = home.path().join("SomniumSetup.exe");
     std::fs::write(&exe, "MZ").unwrap();
 
-    let without = inst.run(Mode::Install, &Options::default()).await;
+    // No installer given: AASL downloads it and runs it silently.
+    let st = inst.run(Mode::Install, &Options::default()).await.unwrap();
+    assert!(st.is_installed());
     assert!(
-        without
-            .unwrap_err()
-            .to_string()
-            .contains("somniumspace.com")
+        inst.paths
+            .downloads_dir()
+            .join("SomniumSpaceSetup.exe")
+            .exists()
     );
 
     let opts = Options {

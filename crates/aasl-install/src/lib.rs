@@ -36,6 +36,28 @@ pub fn proton_manager(
     m
 }
 
+/// The user's language from the usual locale variables.
+pub fn system_locale() -> Option<String> {
+    ["LC_ALL", "LC_MESSAGES", "LANG"]
+        .iter()
+        .filter_map(|k| std::env::var(k).ok())
+        .find(|v| !v.is_empty() && v != "C" && v != "POSIX")
+}
+
+/// Inno Setup language name for a locale (`fr_FR.UTF-8` is `french`).
+/// Somnium's installer ships English, German, Spanish, French, Russian
+/// and Japanese; anything else gets English.
+pub fn inno_language(locale: &str) -> &'static str {
+    match locale.get(..2).map(str::to_ascii_lowercase).as_deref() {
+        Some("fr") => "french",
+        Some("de") => "german",
+        Some("es") => "spanish",
+        Some("ru") => "russian",
+        Some("ja") => "japanese",
+        _ => "english",
+    }
+}
+
 pub fn umu_run(paths: &aasl_core::Paths) -> PathBuf {
     paths.umu_dir().join("umu-run")
 }
@@ -46,4 +68,15 @@ pub fn umu_command(umu: &Path, proton: &Path, prefix: &Path) -> CommandSpec {
         .env("PROTONPATH", proton.display().to_string())
         .env("WINEPREFIX", prefix.display().to_string())
         .env("GAMEID", GAME_ID)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn inno_languages() {
+        assert_eq!(super::inno_language("fr_FR.UTF-8"), "french");
+        assert_eq!(super::inno_language("ja_JP"), "japanese");
+        assert_eq!(super::inno_language("pt_BR.UTF-8"), "english");
+        assert_eq!(super::inno_language(""), "english");
+    }
 }
