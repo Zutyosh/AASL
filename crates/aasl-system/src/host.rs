@@ -10,6 +10,10 @@ pub trait Host: Send + Sync {
     fn list_dir(&self, path: &Path) -> Vec<PathBuf>;
     /// Run a command and return its stdout and stderr joined, if it ran.
     fn run(&self, program: &str, args: &[&str]) -> Option<String>;
+    /// The path with symlinks resolved, or the path itself.
+    fn canonicalize(&self, path: &Path) -> PathBuf {
+        path.to_path_buf()
+    }
 
     fn home(&self) -> PathBuf {
         PathBuf::from(self.env("HOME").unwrap_or_default())
@@ -41,6 +45,9 @@ impl Host for RealHost {
         s.push_str(&String::from_utf8_lossy(&out.stderr));
         Some(s)
     }
+    fn canonicalize(&self, path: &Path) -> PathBuf {
+        std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+    }
 }
 
 /// In-memory host for tests.
@@ -49,6 +56,7 @@ pub struct FakeHost {
     pub env: HashMap<String, String>,
     pub files: HashMap<PathBuf, String>,
     pub commands: HashMap<String, String>,
+    pub links: HashMap<PathBuf, PathBuf>,
 }
 
 impl FakeHost {
@@ -66,6 +74,10 @@ impl FakeHost {
         self.files.insert(p.into(), content.into());
         self
     }
+    pub fn with_link(mut self, link: &str, target: &str) -> Self {
+        self.links.insert(link.into(), target.into());
+        self
+    }
     pub fn with_command(mut self, cmdline: &str, out: &str) -> Self {
         self.commands.insert(cmdline.into(), out.into());
         self
@@ -77,10 +89,28 @@ impl Host for FakeHost {
         self.env.get(key).cloned()
     }
     fn read(&self, path: &Path) -> Option<String> {
-        self.files.get(path).cloned()
+        self.files.get(&self.canonicalize(path)).cloned()
     }
     fn exists(&self, path: &Path) -> bool {
-        self.files.contains_key(path) || self.files.keys().any(|k| k.starts_with(path))
+        let path = self.canonicalize(path);
+        self.files.contains_key(&path) || self.files.keys().any(|k| k.starts_with(&path))
+    }
+    fn canonicalize(&self, path: &Path) -> PathBuf {
+        let mut out = PathBuf::new();
+        for c in path.components() {
+            match c {
+                std::path::Component::ParentDir => {
+                    out.pop();
+                }
+                c => {
+                    out.push(c);
+                    if let Some(t) = self.links.get(&out) {
+                        out = t.clone();
+                    }
+                }
+            }
+        }
+        out
     }
     fn list_dir(&self, path: &Path) -> Vec<PathBuf> {
         let mut out: Vec<PathBuf> = self

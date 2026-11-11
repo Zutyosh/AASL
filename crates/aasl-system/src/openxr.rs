@@ -144,7 +144,11 @@ fn parse_manifest(host: &dyn Host, manifest: &Path) -> Option<OpenXrRuntime> {
     let library = if lib.is_absolute() {
         lib.to_path_buf()
     } else {
-        manifest.parent().unwrap_or(Path::new("/")).join(lib)
+        // Relative to the manifest's real location: WiVRn and Monado link
+        // active_runtime.json to /usr/share/openxr/1/*.json with a path
+        // like ../../../lib/..., which the loader resolves from there.
+        let real = host.canonicalize(manifest);
+        host.canonicalize(&real.parent().unwrap_or(Path::new("/")).join(lib))
     };
     let name = rt.get("name").and_then(|n| n.as_str()).map(str::to_string);
     let kind = classify(&format!(
@@ -392,10 +396,27 @@ mod tests {
         let h = FakeHost::new().with_file("/etc/xdg/openxr/1/active_runtime.json", MONADO_REL);
         let rt = active_runtime(&h).unwrap();
         assert_eq!(rt.kind, RuntimeKind::Monado);
+        assert_eq!(rt.library, PathBuf::from("/etc/lib/libopenxr_monado.so"));
+    }
+
+    #[test]
+    fn relative_library_follows_the_manifest_symlink() {
+        let h = FakeHost::new()
+            .with_link(
+                "/home/u/.config/openxr/1/active_runtime.json",
+                "/usr/share/openxr/1/openxr_wivrn.json",
+            )
+            .with_file(
+                "/usr/share/openxr/1/openxr_wivrn.json",
+                r#"{"runtime":{"name":"WiVRn","library_path":"../../../lib/wivrn/libopenxr_wivrn.so"}}"#,
+            )
+            .with_file("/usr/lib/wivrn/libopenxr_wivrn.so", "");
+        let rt = active_runtime(&h).unwrap();
         assert_eq!(
             rt.library,
-            PathBuf::from("/etc/xdg/openxr/1/../../../lib/libopenxr_monado.so")
+            PathBuf::from("/usr/lib/wivrn/libopenxr_wivrn.so")
         );
+        assert!(h.exists(&rt.library));
     }
 
     #[test]
