@@ -10,7 +10,9 @@ use freya::prelude::*;
 use crate::i18n::{step, t};
 use crate::state::{Screen, Ui};
 use crate::theme::{RADIUS_PILL, T, alpha, space};
-use crate::widgets::{Tone, body, chip, display, dot, link, muted, percent, pill, title};
+use crate::widgets::{
+    Tone, body, chip, display, dot, link, muted, percent, pill, proton_label, title,
+};
 use crate::{app, svc};
 
 #[derive(Clone, Copy, PartialEq)]
@@ -269,18 +271,6 @@ fn welcome(mut w: Wiz) -> impl IntoElement {
                 .on_press(move |_| w.page.set(Page::Proton))
                 .into_element(),
         ]))
-}
-
-fn proton_label(id: &str) -> (String, String) {
-    match aasl_components::ProtonId::parse(id) {
-        Ok(p) => (
-            p.tag.clone(),
-            aasl_components::proton::provider(&p.provider)
-                .map(|x| x.title.to_string())
-                .unwrap_or(p.provider),
-        ),
-        Err(_) => (id.to_string(), String::new()),
-    }
 }
 
 fn proton(mut w: Wiz) -> impl IntoElement {

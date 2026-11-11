@@ -11,7 +11,7 @@ use crate::loader::OrbitLoader;
 use crate::state::Ui;
 use crate::svc;
 use crate::theme::{RADIUS_PANEL, RADIUS_PILL, T, alpha, size, space};
-use crate::widgets::{Tone, body, chip, group, muted, percent, row, title};
+use crate::widgets::{Tone, body, chip, group, muted, percent, proton_name, row, title};
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum Step {
@@ -195,13 +195,6 @@ fn free_id(title: &str) -> String {
         n += 1;
     }
     id
-}
-
-fn proton_name(id: &ProtonId) -> (String, String) {
-    let provider = aasl_components::proton::provider(&id.provider)
-        .map(|p| p.title.to_string())
-        .unwrap_or_else(|| id.provider.clone());
-    (id.tag.clone(), provider)
 }
 
 fn check_icon() -> impl IntoElement {

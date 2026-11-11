@@ -270,3 +270,19 @@ pub fn mono_box(text: impl Into<String>) -> Rect {
                 .color(T.text),
         )
 }
+
+/// A Proton's tag and the title of its provider.
+pub fn proton_name(id: &aasl_components::ProtonId) -> (String, String) {
+    let provider = aasl_components::proton::provider(&id.provider)
+        .map(|p| p.title.to_string())
+        .unwrap_or_else(|| id.provider.clone());
+    (id.tag.clone(), provider)
+}
+
+/// [`proton_name`] for an id saved as text; an unreadable id is shown as is.
+pub fn proton_label(id: &str) -> (String, String) {
+    match aasl_components::ProtonId::parse(id) {
+        Ok(p) => proton_name(&p),
+        Err(_) => (id.to_string(), String::new()),
+    }
+}
