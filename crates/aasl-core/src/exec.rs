@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 use std::future::Future;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::process::Stdio;
 
@@ -111,6 +111,78 @@ pub fn spawn(spec: &CommandSpec, events: &Events) -> Result<tokio::process::Chil
     Ok(child)
 }
 
+/// Spawn a long-lived program detached from the caller: its own process
+/// group, output written to `log` instead of pipes. Closing the launcher
+/// (GUI, CLI with --detach, an agent's MCP process) then cannot take the
+/// game down with a broken pipe or a group signal. The file is tailed onto
+/// the event bus while the process lives.
+pub fn spawn_logged(
+    spec: &CommandSpec,
+    log: &Path,
+    events: &Events,
+) -> Result<tokio::process::Child> {
+    if let Some(d) = log.parent() {
+        std::fs::create_dir_all(d)
+            .map_err(|e| Error::io(format!("creating {}", d.display()), e))?;
+    }
+    let out = std::fs::File::create(log)
+        .map_err(|e| Error::io(format!("creating {}", log.display()), e))?;
+    let err = out
+        .try_clone()
+        .map_err(|e| Error::io("duplicating the log handle", e))?;
+    let mut cmd = Command::new(&spec.program);
+    cmd.args(&spec.args)
+        .envs(&spec.env)
+        .stdin(Stdio::null())
+        .stdout(out)
+        .stderr(err)
+        .process_group(0)
+        .kill_on_drop(false);
+    if let Some(cwd) = &spec.cwd {
+        cmd.current_dir(cwd);
+    }
+    let child = cmd
+        .spawn()
+        .map_err(|e| Error::io(format!("starting {}", spec.program.display()), e))?;
+    let pid = child.id().unwrap_or_default();
+    let _ = events.send(Event::ProcessStarted {
+        pid,
+        command: spec.display(),
+    });
+    tail(log.to_path_buf(), pid, events.clone());
+    Ok(child)
+}
+
+/// Follow `path` onto the bus until process `pid` is gone and the file is drained.
+fn tail(path: PathBuf, pid: u32, events: Events) {
+    tokio::spawn(async move {
+        let Ok(f) = tokio::fs::File::open(&path).await else {
+            return;
+        };
+        let mut lines = BufReader::new(f).lines();
+        let mut gone = false;
+        loop {
+            match lines.next_line().await {
+                Ok(Some(line)) => {
+                    let _ = events.send(Event::Log {
+                        source: LogSource::Stdout,
+                        line,
+                    });
+                }
+                Ok(None) => {
+                    // One more pass after the process is gone, for its last writes.
+                    if gone {
+                        break;
+                    }
+                    gone = !Path::new(&format!("/proc/{pid}")).exists();
+                    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                }
+                Err(_) => break,
+            }
+        }
+    });
+}
+
 fn forward(
     r: impl tokio::io::AsyncRead + Unpin + Send + 'static,
     source: LogSource,
@@ -127,6 +199,28 @@ fn forward(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn logged_spawn_writes_file_and_tails_it() {
+        let d = tempfile::tempdir().unwrap();
+        let log = d.path().join("l/game.log");
+        let events = crate::event_bus();
+        let mut rx = events.subscribe();
+        let spec = CommandSpec::new("sh")
+            .arg("-c")
+            .arg("echo one; sleep 0.3; echo two >&2");
+        let mut c = spawn_logged(&spec, &log, &events).unwrap();
+        assert_eq!(c.wait().await.unwrap().code(), Some(0));
+        tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+        let mut lines = Vec::new();
+        while let Ok(e) = rx.try_recv() {
+            if let Event::Log { line, .. } = e {
+                lines.push(line);
+            }
+        }
+        assert_eq!(lines, ["one", "two"]);
+        assert_eq!(std::fs::read_to_string(&log).unwrap(), "one\ntwo\n");
+    }
 
     #[tokio::test]
     async fn streams_output_and_exit_code() {

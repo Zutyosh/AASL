@@ -142,7 +142,8 @@ impl Launcher {
             Severity::Info,
             format!("Detected OpenXR runtime: {}", env.runtime_label),
         );
-        spawn(&spec, &self.events)
+        let log = self.paths.logs_dir().join("somnium.log");
+        aasl_core::exec::spawn_logged(&spec, &log, &self.events)
     }
 }
 
