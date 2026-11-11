@@ -18,8 +18,8 @@ Utilitarian, calm, exact. The app reads like a good instrument panel: state firs
 
 All colours and type go through `crates/aasl-gui/src/theme.rs`. No literal colour appears in a component.
 
-| Token | Dark | Light | Use |
-|---|---|---|---|
+| Token | Value | Use |
+|---|---|---|
 | `bg` | #16151b | window background |
 | `surface` | #211f28 | sidebar, row groups |
 | `raised` | #2c2935 | selected item, toasts |
@@ -38,7 +38,7 @@ Type: one family (Inter, system sans fallback). Sizes 13 / 15 / 18 / 24 / 36. Bo
 
 Spacing scale: 4, 8, 12, 16, 24, 32, 48. Radius: 10 for controls, 16 for panels, pills for the main actions; never a panel inside a panel.
 
-Logo: `assets/aasl-logo.svg`, a crescent holding a play mark on a dark squircle, two flat colours. PNGs are rendered from it with `rsvg-convert`.
+App icon: `assets/aasl-logo.svg`, a crescent holding a play mark on a dark squircle, two flat colours. PNGs are rendered from it with `rsvg-convert`. It is used for the desktop icon and inside the app, not in the README.
 
 ## Controls
 

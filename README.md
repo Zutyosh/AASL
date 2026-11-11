@@ -1,5 +1,3 @@
-<p align="center"><img src="assets/aasl-512.png" width="160" alt="AASL logo"></p>
-
 # AASL: An Another Somnium Launcher
 
 AASL installs, launches and troubleshoots [Somnium Space](https://somniumspace.com) on Linux. It comes as a desktop app (Rust + [Freya](https://freyaui.dev)), a command line (`aasl`) and an MCP server. The MCP server lets a coding agent read the same state and logs you see and test fixes.
@@ -88,7 +86,7 @@ AASL builds on [Somnilux](https://github.com/Vulps22/somnilux) by Vulps22: the W
 
 ## Not affiliated
 
-AASL is not affiliated with Somnium Space Ltd, the Wine project or WineHQ. It does not distribute Somnium's client or launcher; you download the installer from somniumspace.com yourself. The logo is an original design inspired by Somnium's cube.
+AASL is not affiliated with Somnium Space Ltd, the Wine project or WineHQ. It does not distribute Somnium's client or launcher; you download the installer from somniumspace.com yourself. The app icon is an original design.
 
 ## License
 
