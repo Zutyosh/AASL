@@ -80,6 +80,42 @@ pub struct Perf {
 }
 
 pub const HITCH_MS: f32 = 150.0;
+/// MangoHud's frame time is the time since the previous present. Past
+/// this the game was not drawing to its window at all (headset only,
+/// minimised): a hole in the log, not a frame, so it is left out.
+pub const GAP_MS: f32 = 5000.0;
+
+/// Frame times of a MangoHud CSV with the wanted columns (0 when absent),
+/// holes in the log left out. None without a frametime column.
+pub(crate) fn mangohud_rows<const N: usize>(
+    text: &str,
+    cols: [&str; N],
+) -> Option<Vec<(f32, [f32; N])>> {
+    let mut lines = text.lines();
+    let header: Vec<&str> = lines
+        .by_ref()
+        .find(|l| l.starts_with("fps,"))?
+        .split(',')
+        .map(str::trim)
+        .collect();
+    let col = |name: &str| header.iter().position(|c| *c == name);
+    let ft_col = col("frametime")?;
+    let extra = cols.map(col);
+    Some(
+        lines
+            .filter_map(|l| {
+                let v: Vec<&str> = l.split(',').collect();
+                let num = |c: Option<usize>| {
+                    c.and_then(|c| v.get(c)?.trim().parse::<f32>().ok())
+                        .filter(|x| x.is_finite())
+                        .unwrap_or(0.0)
+                };
+                let ft = v.get(ft_col)?.trim().parse::<f32>().ok()?;
+                (ft > 0.0 && ft < GAP_MS).then(|| (ft, extra.map(num)))
+            })
+            .collect(),
+    )
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Hitches {
@@ -363,28 +399,7 @@ pub fn scan_player_log(r: impl std::io::BufRead) -> LogProbe {
 
 /// Frame pacing from a MangoHud CSV log (`MANGOHUD_CONFIG=autostart_log=…`).
 pub fn parse_mangohud(text: &str) -> Option<Perf> {
-    let mut lines = text.lines();
-    let header: Vec<&str> = lines
-        .by_ref()
-        .find(|l| l.starts_with("fps,"))?
-        .split(',')
-        .map(str::trim)
-        .collect();
-    let col = |name: &str| header.iter().position(|c| *c == name);
-    let ft_col = col("frametime")?;
-    let extra = [col("gpu_load"), col("gpu_core_clock"), col("cpu_load")];
-    let rows: Vec<(f32, [f32; 3])> = lines
-        .filter_map(|l| {
-            let v: Vec<&str> = l.split(',').collect();
-            let num = |c: Option<usize>| {
-                c.and_then(|c| v.get(c)?.trim().parse::<f32>().ok())
-                    .filter(|x| x.is_finite())
-                    .unwrap_or(0.0)
-            };
-            let ft = v.get(ft_col)?.trim().parse::<f32>().ok()?;
-            (ft > 0.0 && ft.is_finite()).then(|| (ft, extra.map(num)))
-        })
-        .collect();
+    let rows = mangohud_rows(text, ["gpu_load", "gpu_core_clock", "cpu_load"])?;
     if rows.len() < 100 {
         return None;
     }

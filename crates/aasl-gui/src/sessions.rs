@@ -11,7 +11,7 @@ use crate::i18n::{Lang, current, fill, recipe_title, t};
 use crate::state::Ui;
 use crate::svc;
 use crate::theme::{RADIUS_CONTROL, Rgb, T, alpha, size, space};
-use crate::widgets::{Tone, body, chip, group, muted, row, title};
+use crate::widgets::{Tone, banner, body, chip, group, muted, row, title};
 
 #[cfg(test)]
 thread_local! {
@@ -725,9 +725,26 @@ impl Component for SessionDetail {
                         },
                     )
                 });
+                // MangoHud only sees what the game draws to its window: in
+                // the headset alone the log has holes, so say how much it saw.
+                let seen = tl.duration_s();
+                let partial = (seen < 0.8 * r.duration_s as f32).then(|| {
+                    let seen = if seen < 60. {
+                        format!("{seen:.0} s")
+                    } else {
+                        dur(seen as u64)
+                    };
+                    banner(
+                        Tone::Warn,
+                        t("ses.partial"),
+                        fill(t("ses.partial.sub"), &[seen, dur(r.duration_s)]),
+                        None,
+                    )
+                });
                 rect()
                     .width(Size::fill())
                     .spacing(space::L)
+                    .maybe_child(partial)
                     .child(fps_card)
                     .maybe_child(load_card)
                     .into_element()

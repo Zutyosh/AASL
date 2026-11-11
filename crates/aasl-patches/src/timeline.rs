@@ -35,28 +35,14 @@ impl Timeline {
 
 /// Slice a MangoHud CSV by playing time (the sum of its frame times).
 pub fn from_mangohud(text: &str) -> Option<Timeline> {
-    let mut lines = text.lines();
-    let header: Vec<&str> = lines
-        .by_ref()
-        .find(|l| l.starts_with("fps,"))?
-        .split(',')
-        .map(str::trim)
-        .collect();
-    let col = |name: &str| header.iter().position(|c| *c == name);
-    let ft_col = col("frametime")?;
-    let (gpu_col, cpu_col) = (col("gpu_load"), col("cpu_load"));
-    let rows: Vec<(f32, f32, f32)> = lines
-        .filter_map(|l| {
-            let v: Vec<&str> = l.split(',').collect();
-            let num = |c: Option<usize>| {
-                c.and_then(|c| v.get(c)?.trim().parse::<f32>().ok())
-                    .filter(|x| x.is_finite())
-                    .unwrap_or(0.0)
-            };
-            let ft = v.get(ft_col)?.trim().parse::<f32>().ok()?;
-            (ft > 0.0 && ft.is_finite()).then(|| (ft, num(gpu_col), num(cpu_col)))
-        })
-        .collect();
+    let has_load = text
+        .lines()
+        .find(|l| l.starts_with("fps,"))
+        .is_some_and(|h| {
+            h.split(',')
+                .any(|c| matches!(c.trim(), "gpu_load" | "cpu_load"))
+        });
+    let rows = crate::community::mangohud_rows(text, ["gpu_load", "cpu_load"])?;
     if rows.len() < 100 {
         return None;
     }
@@ -78,7 +64,7 @@ pub fn from_mangohud(text: &str) -> Option<Timeline> {
         }
         *acc = (0, 0.0, 0.0, 0.0, 0.0, 0);
     };
-    for (ft, gpu, cpu) in &rows {
+    for (ft, [gpu, cpu]) in &rows {
         clock += ft;
         acc.0 += 1;
         acc.1 += ft;
@@ -90,13 +76,15 @@ pub fn from_mangohud(text: &str) -> Option<Timeline> {
         }
         if clock >= next {
             flush(&mut acc, &mut points);
-            next += step_ms;
+            while next <= clock {
+                next += step_ms;
+            }
         }
     }
     flush(&mut acc, &mut points);
     Some(Timeline {
         step_s: step_ms / 1000.0,
-        has_load: gpu_col.is_some() || cpu_col.is_some(),
+        has_load,
         points,
     })
 }
@@ -120,5 +108,25 @@ mod tests {
         assert!(a.fps > 90.0 && b.fps < 60.0, "{a:?} {b:?}");
         assert!(t.has_load && (a.gpu - 60.0).abs() < 0.1);
         assert!(from_mangohud("fps,frametime\n1,2\n").is_none());
+    }
+
+    #[test]
+    fn a_hole_in_the_log_is_not_a_frame() {
+        // MangoHud logged 10 s, nothing for an hour and a half while the
+        // game drew only to the headset, then 10 s: one bogus frame time.
+        let mut s = String::from("fps,frametime,cpu_load,gpu_load\n");
+        for i in 0..2000 {
+            s.push_str("100,10,30,60\n");
+            if i == 999 {
+                s.push_str("0.0001,14473600,30,60\n");
+            }
+        }
+        let t = from_mangohud(&s).unwrap();
+        assert!((t.duration_s() - 20.0).abs() < 0.5, "{}", t.duration_s());
+        assert!(t.points.iter().all(|p| p.fps > 90.0 && p.hitches == 0));
+        let p = crate::community::parse_mangohud(&s).unwrap();
+        assert_eq!(p.frames, 2000);
+        assert!(p.avg_fps > 99.0 && p.low1_fps > 99.0, "{p:?}");
+        assert!(p.hitches.is_none());
     }
 }
