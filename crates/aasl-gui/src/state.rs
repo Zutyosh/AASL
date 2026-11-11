@@ -20,16 +20,16 @@ pub enum Screen {
 #[derive(Clone, Copy, PartialEq)]
 pub enum Section {
     General,
-    Proton,
-    Patches,
+    Recipes,
     Vr,
     Diagnostics,
     Logs,
     Agents,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct Ui {
+    pub background: State<Option<std::path::PathBuf>>,
     pub screen: State<Screen>,
     pub section: State<Section>,
     pub status: State<Status>,
@@ -46,6 +46,8 @@ pub struct Ui {
     pub provider: State<&'static str>,
     pub update: State<Option<aasl_service::UpdateInfo>>,
     pub restart_ready: State<bool>,
+    /// The compile screen was dismissed for the current build.
+    pub build_hidden: State<bool>,
 }
 
 impl Ui {
@@ -63,7 +65,9 @@ impl Ui {
         on_ok: impl FnOnce(T) + 'static,
     ) {
         self.error.set(None);
-        spawn(async move {
+        // Window-level: the button that started it may unmount (Play turns
+        // into Stop), which would cancel a component task.
+        spawn_in_window(async move {
             match tokio::spawn(fut).await {
                 Ok(Ok(v)) => on_ok(v),
                 Ok(Err(e)) => self.error.set(Some(e.to_string())),
@@ -84,22 +88,55 @@ impl Ui {
         let provider = *self.provider.read();
         self.run(
             async move { svc().proton_releases(provider, refresh).await },
-            move |v| self.releases.set(v),
+            move |v| {
+                if *self.provider.peek() == provider {
+                    self.releases.set(v)
+                }
+            },
         );
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Snapshot test: open Settings on this section, and show the compile screen.
+    pub static TEST_SECTION: std::cell::Cell<Option<Section>> = const { std::cell::Cell::new(None) };
+    pub static TEST_BUILD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn test_section() -> Option<Section> {
+    #[cfg(test)]
+    {
+        return TEST_SECTION.with(|s| s.get());
+    }
+    #[allow(unreachable_code)]
+    None
+}
+
+/// The compile screen is up: a build runs (or the snapshot test asks for it).
+pub fn building(ui: Ui) -> bool {
+    #[cfg(test)]
+    if TEST_BUILD.with(|b| b.get()) {
+        return true;
+    }
+    ui.status.read().operation.as_deref() == Some("patch_build") && !*ui.build_hidden.read()
+}
+
 pub fn use_ui() -> Ui {
     let first = !svc().status().installed;
+    let test = test_section();
     let mut ui = Ui {
+        background: use_state(|| svc().background()),
         screen: use_state(move || {
-            if first {
+            if test.is_some() {
+                Screen::Settings
+            } else if first {
                 Screen::Wizard
             } else {
                 Screen::Launcher
             }
         }),
-        section: use_state(|| Section::General),
+        section: use_state(move || test.unwrap_or(Section::General)),
         status: use_state(|| svc().status()),
         step: use_state(|| None),
         done_steps: use_state(Vec::new),
@@ -114,6 +151,7 @@ pub fn use_ui() -> Ui {
         provider: use_state(|| "ge"),
         update: use_state(|| svc().update_cached()),
         restart_ready: use_state(|| false),
+        build_hidden: use_state(|| false),
     };
 
     use_future(move || async move {
@@ -121,11 +159,25 @@ pub fn use_ui() -> Ui {
         loop {
             let ev = match rx.recv().await {
                 Ok(ev) => ev,
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                    // Wine's output can outrun us; resync what was missed.
+                    let st = svc().status();
+                    if st.operation.is_none() {
+                        ui.step.set(None);
+                        ui.progress.set(None);
+                    }
+                    ui.status.set(st);
+                    continue;
+                }
                 Err(_) => break,
             };
             match ev {
-                Event::OperationStarted { .. } => ui.done_steps.set(Vec::new()),
+                Event::OperationStarted { operation } => {
+                    ui.done_steps.set(Vec::new());
+                    if operation == "patch_build" {
+                        ui.build_hidden.set(false);
+                    }
+                }
                 Event::StepStarted { step } => ui.step.set(Some(step)),
                 Event::StepFinished { step, .. } => ui.done_steps.write().push(step),
                 Event::Progress { task, done, total } => ui.progress.set(Some((task, done, total))),
@@ -137,6 +189,14 @@ pub fn use_ui() -> Ui {
                 }
                 _ => {}
             }
+        }
+    });
+
+    use_future(move || async move {
+        if let Ok(Ok(p)) = tokio::spawn(async { svc().fetch_background().await }).await
+            && ui.background.peek().as_ref() != Some(&p)
+        {
+            ui.background.set(Some(p));
         }
     });
 

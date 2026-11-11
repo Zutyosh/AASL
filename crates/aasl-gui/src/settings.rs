@@ -6,26 +6,53 @@ use freya::prelude::*;
 
 use crate::i18n::t;
 use crate::state::{Screen, Section, Ui};
-use crate::theme::{T, size, space};
-use crate::widgets::{Tone, body, chip, group, muted, row, severity_tone, title};
+use aasl_service::PatchSource;
+
+use crate::theme::{RADIUS_PILL, T, alpha, size, space};
+use crate::widgets::{Tone, body, chip, group, muted, percent, row, severity_tone, title};
 use crate::{approvals, svc};
 
 const SECTIONS: &[(Section, &str)] = &[
     (Section::General, "prefs.general"),
-    (Section::Proton, "prefs.proton"),
-    (Section::Patches, "prefs.patches"),
+    (Section::Recipes, "prefs.recipes"),
     (Section::Vr, "prefs.vr"),
     (Section::Diagnostics, "prefs.diagnostics"),
     (Section::Logs, "prefs.logs"),
     (Section::Agents, "prefs.agents"),
 ];
 
-pub fn view(mut ui: Ui) -> impl IntoElement {
+#[derive(PartialEq)]
+pub struct SettingsScreen(pub Ui);
+
+impl Component for SettingsScreen {
+    fn render(&self) -> impl IntoElement {
+        view(self.0)
+    }
+}
+
+#[derive(PartialEq)]
+struct GeneralSection(Ui);
+
+impl Component for GeneralSection {
+    fn render(&self) -> impl IntoElement {
+        general(self.0)
+    }
+}
+
+#[derive(PartialEq)]
+pub(crate) struct ProtonSection(pub Ui);
+
+impl Component for ProtonSection {
+    fn render(&self) -> impl IntoElement {
+        proton(self.0)
+    }
+}
+
+fn view(mut ui: Ui) -> impl IntoElement {
     let section = *ui.section.read();
     let content: Element = match section {
-        Section::General => general(ui).into_element(),
-        Section::Proton => proton(ui).into_element(),
-        Section::Patches => patches(ui).into_element(),
+        Section::General => GeneralSection(ui).into_element(),
+        Section::Recipes => crate::recipes::RecipesSection(ui).into_element(),
         Section::Vr => vr().into_element(),
         Section::Diagnostics => diagnostics(ui).into_element(),
         Section::Logs => logs(ui).into_element(),
@@ -37,37 +64,58 @@ pub fn view(mut ui: Ui) -> impl IntoElement {
         .content(Content::Flex)
         .child(
             rect()
-                .width(Size::px(220.))
+                .width(Size::px(236.))
                 .height(Size::fill())
                 .padding(space::L)
-                .spacing(space::XS)
+                .spacing(2.)
                 .background(T.surface)
-                .child(
-                    rect()
-                        .padding((0., 0., space::L, 0.))
-                        .child(crate::app::brand()),
+                .border(
+                    Border::new()
+                        .fill(T.border)
+                        .width(1.)
+                        .alignment(BorderAlignment::Inner),
                 )
                 .child(
                     Button::new()
+                        .compact()
                         .flat()
-                        .expanded()
                         .on_press(move |_| ui.screen.set(Screen::Launcher))
-                        .child(t("nav.back")),
+                        .child(format!("← {}", t("nav.back"))),
                 )
-                .child(rect().height(Size::px(space::S)))
+                .child(
+                    rect()
+                        .padding((space::S, space::S, space::XL, space::S))
+                        .child(crate::app::brand()),
+                )
                 .children(
                     SECTIONS
                         .iter()
                         .map(|(s, key)| {
                             let s = *s;
-                            let b = Button::new().key(*key).expanded().on_press(move |_| {
-                                ui.section.set(s);
-                                if s == Section::Proton && ui.releases.read().is_empty() {
-                                    ui.load_releases(false);
-                                }
-                            });
-                            let b = if s == section { b.filled() } else { b.flat() };
-                            b.child(t(key))
+                            let selected = s == section;
+                            Button::new()
+                                .key(*key)
+                                .expanded()
+                                .flat()
+                                .background(if selected {
+                                    alpha(T.raised, 1.0)
+                                } else {
+                                    alpha(T.bg, 0.0)
+                                })
+                                .on_press(move |_| ui.section.set(s))
+                                .child(
+                                    rect().width(Size::fill()).child(
+                                        label()
+                                            .text(t(key))
+                                            .color(if selected { T.text } else { T.muted })
+                                            .font_weight(if selected {
+                                                FontWeight::MEDIUM
+                                            } else {
+                                                FontWeight::NORMAL
+                                            }),
+                                    ),
+                                )
+                                .into_element()
                         })
                         .collect::<Vec<_>>(),
                 ),
@@ -79,8 +127,8 @@ pub fn view(mut ui: Ui) -> impl IntoElement {
                 .child(
                     rect()
                         .width(Size::fill())
-                        .max_width(Size::px(820.))
-                        .padding(space::XXL)
+                        .max_width(Size::px(860.))
+                        .padding((space::XXXL, space::XXXL))
                         .spacing(space::XL)
                         .child(content),
                 ),
@@ -223,16 +271,34 @@ fn general(mut ui: Ui) -> impl IntoElement {
         ))
 }
 
-fn patch_chip(p: Option<aasl_patches::TargetStatus>) -> Rect {
-    match p {
-        Some(aasl_patches::TargetStatus::Verified) => chip(t("prefs.patch.verified"), Tone::Ok),
-        Some(_) => chip(t("prefs.patch.untested"), Tone::Warn),
-        None => chip(t("prefs.patch.none"), Tone::Neutral),
+fn source_chip(s: PatchSource, can_build: bool) -> Rect {
+    match s {
+        PatchSource::Published(aasl_patches::TargetStatus::Verified) => {
+            chip(t("prefs.patch.verified"), Tone::Ok)
+        }
+        PatchSource::Published(_) => chip(t("prefs.patch.untested"), Tone::Warn),
+        PatchSource::Built => chip(t("prefs.patch.built"), Tone::Ok),
+        PatchSource::NotNeeded => chip(t("prefs.patch.not_needed"), Tone::Ok),
+        PatchSource::MustBuild if can_build => chip(t("prefs.patch.on_use"), Tone::Neutral),
+        PatchSource::MustBuild => chip(t("prefs.patch.need_builder"), Tone::Error),
     }
 }
 
+/// After ProtonPlus: every provider, every recent release, installed
+/// builds on top. Using a build without published patches builds them.
 fn proton(mut ui: Ui) -> impl IntoElement {
+    let mut show_all = use_state(|| false);
+    use_hook(move || {
+        ui.releases.set(Vec::new());
+        ui.load_releases(false)
+    });
     let busy = ui.status.read().operation.is_some();
+    let progress = ui.progress.read().clone();
+    let can_build = svc().patch_builder().is_some();
+    let reload = move |mut ui: Ui| {
+        ui.installed.set(svc().proton_installed());
+        ui.load_releases(false);
+    };
     let installed: Vec<Element> = ui
         .installed
         .read()
@@ -240,49 +306,63 @@ fn proton(mut ui: Ui) -> impl IntoElement {
         .map(|p| {
             let id = p.proton.id.clone();
             let id2 = id.clone();
+            let provider = aasl_components::proton::provider(&id.provider)
+                .map(|x| x.title)
+                .unwrap_or("");
             let patch = match (&p.patches.bundle, p.patches.intact) {
-                (Some(b), true) => format!("{} · {b}", p.proton.variant),
-                (Some(b), false) => format!("{} · {b} ({})", p.proton.variant, t("stat.changed")),
-                (None, _) => format!("{} · {}", p.proton.variant, t("prefs.patch.none")),
+                (Some(_), true) => t("stat.intact").to_string(),
+                (Some(_), false) => t("stat.changed").to_string(),
+                (None, _) => t("prefs.patch.none").to_string(),
             };
+            let usable = can_build || svc().patch_source(&id) != PatchSource::MustBuild;
             let trailing = if p.in_use {
-                chip(t("prefs.proton.in_use"), Tone::Ok).into_element()
+                chip(t("prefs.proton.in_use"), Tone::Accent).into_element()
             } else {
                 rect()
                     .horizontal()
                     .spacing(space::S)
                     .child(
                         Button::new()
-                            .flat()
-                            .enabled(!busy)
+                            .compact()
+                            .enabled(!busy && usable)
                             .on_press(move |_| {
                                 let id = id.clone();
-                                ui.run(async move { svc().proton_use(id, false).await }, |_| {})
+                                ui.run(
+                                    async move { svc().proton_use(id, false).await },
+                                    move |_| reload(ui),
+                                )
                             })
                             .child(t("prefs.proton.use")),
                     )
                     .child(
                         Button::new()
+                            .compact()
                             .flat()
+                            .enabled(!busy)
                             .on_press(move |_| {
                                 if let Err(e) = svc().proton_remove(&id2) {
                                     ui.error.set(Some(e.to_string()));
                                 }
-                                ui.installed.set(svc().proton_installed());
+                                reload(ui);
                             })
                             .child(t("prefs.proton.remove")),
                     )
                     .into_element()
             };
-            row(p.proton.id.to_string(), Some(patch), Some(trailing))
+            row(
+                p.proton.id.tag.clone(),
+                Some(format!("{provider}, {}, {patch}", p.proton.variant)),
+                Some(trailing),
+            )
         })
         .collect();
     let provider = *ui.provider.read();
-    let available: Vec<Element> = ui
-        .releases
-        .read()
-        .iter()
-        .take(12)
+    let releases = ui.releases.read().clone();
+    let total = releases.len();
+    let limit = if *show_all.read() { total } else { 12 };
+    let available: Vec<Element> = releases
+        .into_iter()
+        .take(limit)
         .map(|r| {
             let id = r.id.clone();
             let id2 = id.clone();
@@ -292,52 +372,69 @@ fn proton(mut ui: Ui) -> impl IntoElement {
                 .and_then(|d| d.get(..10))
                 .unwrap_or("")
                 .to_string();
+            let mut sub = date;
+            if r.size > 0 {
+                sub.push_str(&format!(", {:.0} MB", r.size as f64 / 1e6));
+            }
+            if r.prerelease {
+                sub.push_str(&format!(", {}", t("prefs.proton.pre")));
+            }
+            let downloading = progress.as_ref().filter(|(task, _, _)| *task == r.id.tag);
             let trailing = rect()
                 .horizontal()
                 .spacing(space::S)
                 .cross_align(Alignment::Center)
-                .child(patch_chip(r.patches))
-                .maybe_child((!r.installed).then(|| {
-                    Button::new()
-                        .flat()
-                        .enabled(!busy)
-                        .on_press(move |_| {
-                            let id = id.clone();
-                            ui.run(async move { svc().proton_install(id).await }, |_| {})
-                        })
-                        .child(t("prefs.proton.download"))
+                .child(source_chip(r.source, can_build))
+                .maybe_child(downloading.map(|(_, d, tot)| {
+                    rect().width(Size::px(120.)).child(
+                        ProgressBar::new(percent(*d, *tot).unwrap_or(0.))
+                            .show_progress(false)
+                            .width(Size::fill()),
+                    )
                 }))
-                .maybe_child((!r.in_use && r.patches.is_some()).then(|| {
+                .maybe_child((r.in_use).then(|| chip(t("prefs.proton.in_use"), Tone::Accent)))
+                .maybe_child(
+                    (!r.installed && r.variant.is_some() && downloading.is_none()).then(|| {
+                        Button::new()
+                            .compact()
+                            .flat()
+                            .enabled(!busy)
+                            .on_press(move |_| {
+                                let id = id.clone();
+                                ui.run(async move { svc().proton_install(id).await }, move |_| {
+                                    reload(ui)
+                                })
+                            })
+                            .child(t("prefs.proton.download"))
+                    }),
+                )
+                .maybe_child((!r.in_use && r.variant.is_some()).then(|| {
                     Button::new()
-                        .enabled(!busy)
+                        .compact()
+                        .enabled(!busy && (can_build || r.source != PatchSource::MustBuild))
                         .on_press(move |_| {
                             let id = id2.clone();
-                            ui.run(async move { svc().proton_use(id, false).await }, |_| {})
+                            ui.run(
+                                async move { svc().proton_use(id, false).await },
+                                move |_| reload(ui),
+                            )
                         })
                         .child(t("prefs.proton.use"))
                 }))
                 .into_element();
-            row(
-                r.id.tag.clone(),
-                Some(format!(
-                    "{date}{}",
-                    r.variant
-                        .as_deref()
-                        .map(|v| format!(" · {v}"))
-                        .unwrap_or_default()
-                )),
-                Some(trailing),
-            )
+            row(r.id.tag.clone(), Some(sub), Some(trailing))
         })
         .collect();
-    let mut set_provider = move |p: &'static str| {
-        ui.provider.set(p);
-        ui.releases.set(Vec::new());
-        ui.load_releases(false);
-    };
+    let desc = aasl_components::proton::provider(provider)
+        .map(|p| p.description)
+        .unwrap_or("");
     rect()
         .spacing(space::XL)
-        .child(title(t("prefs.proton")))
+        .child(
+            rect()
+                .spacing(space::XS)
+                .child(muted(t("prefs.proton.lead"))),
+        )
         .child(group(
             t("prefs.proton.installed"),
             if installed.is_empty() {
@@ -348,101 +445,67 @@ fn proton(mut ui: Ui) -> impl IntoElement {
         ))
         .child(
             rect()
-                .horizontal()
-                .spacing(space::S)
-                .cross_align(Alignment::Center)
-                .children(
-                    aasl_components::proton::PROVIDERS
-                        .iter()
-                        .map(|p| {
-                            let id = p.id;
-                            let b = Button::new().key(id).on_press(move |_| set_provider(id));
-                            let b = if id == provider { b.filled() } else { b.flat() };
-                            b.child(p.title)
-                        })
-                        .collect::<Vec<_>>(),
-                )
+                .width(Size::fill())
+                .spacing(space::M)
                 .child(
-                    Button::new()
-                        .flat()
-                        .on_press(move |_| ui.load_releases(true))
-                        .child(t("prefs.proton.refresh")),
-                ),
+                    rect()
+                        .width(Size::fill())
+                        .horizontal()
+                        .content(Content::Flex)
+                        .cross_align(Alignment::Center)
+                        .spacing(space::XS)
+                        .children(
+                            aasl_components::proton::PROVIDERS
+                                .iter()
+                                .map(|p| {
+                                    let id = p.id;
+                                    let selected = id == provider;
+                                    Button::new()
+                                        .key(id)
+                                        .compact()
+                                        .corner_radius(RADIUS_PILL)
+                                        .maybe(selected, |b| b.filled())
+                                        .maybe(!selected, |b| b.flat())
+                                        .on_press(move |_| {
+                                            ui.provider.set(id);
+                                            ui.releases.set(Vec::new());
+                                            ui.load_releases(false);
+                                        })
+                                        .child(label().text(p.title).color(if selected {
+                                            T.accent_text
+                                        } else {
+                                            T.text
+                                        }))
+                                        .into_element()
+                                })
+                                .collect::<Vec<_>>(),
+                        )
+                        .child(rect().width(Size::flex(1.)))
+                        .child(
+                            Button::new()
+                                .compact()
+                                .flat()
+                                .on_press(move |_| ui.load_releases(true))
+                                .child(t("prefs.proton.refresh")),
+                        ),
+                )
+                .child(muted(desc)),
         )
-        .child(group(t("prefs.proton.available"), available))
-}
-
-fn patches(mut ui: Ui) -> impl IntoElement {
-    let st = ui.status.read().clone();
-    let busy = st.operation.is_some();
-    let current = match &st.patches {
-        Some(p) => match (&p.bundle, p.intact) {
-            (Some(b), true) => row(
-                b.clone(),
-                Some(t("stat.intact").into()),
-                Some(chip(t("stat.intact"), Tone::Ok).into_element()),
-            ),
-            (Some(b), false) => row(
-                b.clone(),
-                Some(p.changed.join(", ")),
-                Some(chip(t("stat.changed"), Tone::Error).into_element()),
-            ),
-            (None, _) => row(
-                t("stat.none"),
-                None,
-                Some(chip(t("stat.none"), Tone::Error).into_element()),
-            ),
-        },
-        None => row(t("stat.none"), None, None),
-    };
-    let files: Vec<Element> = svc()
-        .patch_list()
-        .unwrap_or_default()
-        .into_iter()
-        .map(|p| row(p.subject, Some(format!("{} · {}", p.series, p.name)), None))
-        .collect();
-    let proton = svc().current_proton();
-    rect()
-        .spacing(space::XL)
-        .child(title(t("prefs.patches")))
-        .child(group(
-            t("prefs.patches.current"),
-            vec![
-                current,
-                row(
-                    t("prefs.patches.build"),
-                    Some(t("prefs.patches.build.sub").into()),
-                    Some(
-                        Button::new()
-                            .enabled(!busy && proton.is_some())
-                            .on_press(move |_| {
-                                if let Some(id) = proton.clone() {
-                                    ui.section.set(Section::Logs);
-                                    ui.run(
-                                        async move { svc().patch_build(id, false, &[]).await },
-                                        move |p| ui.notice(Severity::Info, p.display().to_string()),
-                                    );
-                                }
-                            })
-                            .child(t("prefs.patches.build"))
-                            .into_element(),
-                    ),
-                ),
-                row(
-                    t("prefs.patches.restore"),
-                    None,
-                    Some(
-                        Button::new()
-                            .flat()
-                            .enabled(!busy)
-                            .on_press(move |_| ui.run(async { svc().patch_restore() }, |_| {}))
-                            .child(t("prefs.patches.restore"))
-                            .into_element(),
-                    ),
-                ),
-            ],
-        ))
-        .child(group(t("prefs.patches.files"), files))
+        .child(if available.is_empty() {
+            rect()
+                .width(Size::fill())
+                .padding(space::XL)
+                .center()
+                .child(CircularLoader::new().size(28.))
+        } else {
+            group(t("prefs.proton.available"), available)
+        })
+        .maybe_child((total > limit).then(|| {
+            Button::new()
+                .flat()
+                .on_press(move |_| show_all.set(true))
+                .child(format!("{} ({})", t("prefs.proton.more"), total - limit))
+        }))
 }
 
 fn vr() -> impl IntoElement {
@@ -564,7 +627,7 @@ fn diagnostics(mut ui: Ui) -> impl IntoElement {
                     Button::new()
                         .filled()
                         .on_press(move |_| {
-                            spawn(async move {
+                            spawn_in_window(async move {
                                 if let Ok(v) =
                                     tokio::spawn(async { svc().doctor(true).await }).await
                                 {
@@ -578,7 +641,7 @@ fn diagnostics(mut ui: Ui) -> impl IntoElement {
                     Button::new()
                         .flat()
                         .on_press(move |_| {
-                            spawn(async move {
+                            spawn_in_window(async move {
                                 if let Ok(r) = tokio::spawn(async { svc().report().await }).await {
                                     let p = svc().paths().logs_dir().join("bug-report.json");
                                     let _ = std::fs::create_dir_all(svc().paths().logs_dir());

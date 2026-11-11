@@ -2,8 +2,11 @@
 
 mod app;
 mod approvals;
+mod build_screen;
 mod i18n;
 mod launcher;
+mod loader;
+mod recipes;
 mod settings;
 mod state;
 mod theme;
@@ -105,29 +108,45 @@ mod tests {
             .log_file(false)
             .build()
             .unwrap();
+        if let Ok(bg) = std::env::var("AASL_SNAPSHOT_BG") {
+            std::fs::create_dir_all(&paths.cache_dir).unwrap();
+            std::fs::copy(bg, paths.cache_dir.join("background.jpg")).unwrap();
+        }
         let _ = SERVICE.set(svc);
         let out = std::env::var("AASL_SNAPSHOT_DIR")
             .ok()
             .map(std::path::PathBuf::from);
         let size = Size2D::new(1180., 720.);
 
-        let (mut wizard, _) = TestingRunner::new(app::app, size, |_| {}, 1.0);
-        wizard.sync_and_update();
-        wizard.poll(
-            std::time::Duration::from_millis(50),
-            std::time::Duration::from_millis(1500),
-        );
-        assert!(!wizard.render().is_empty());
-        if let Some(d) = &out {
-            wizard.render_to_file(d.join("wizard.png"));
+        for (i, name) in ["welcome", "proton", "source", "installing", "done"]
+            .iter()
+            .enumerate()
+        {
+            wizard::TEST_PAGE.with(|p| p.set(i as u8));
+            let (mut wizard, _) = TestingRunner::new(app::app, size, |_| {}, 1.0);
+            wizard.sync_and_update();
+            wizard.poll(
+                std::time::Duration::from_millis(50),
+                std::time::Duration::from_millis(1200),
+            );
+            assert!(!wizard.render().is_empty());
+            if let Some(d) = &out {
+                wizard.render_to_file(d.join(format!("wizard-{name}.png")));
+            }
         }
-        drop(wizard);
+        wizard::TEST_PAGE.with(|p| p.set(0));
 
         let launcher_exe = paths
             .default_prefix()
             .join(aasl_components::sources::LAUNCHER_REL_PATH);
         std::fs::create_dir_all(launcher_exe.parent().unwrap()).unwrap();
         std::fs::write(&launcher_exe, "MZ").unwrap();
+        std::fs::create_dir_all(paths.state_file().parent().unwrap()).unwrap();
+        std::fs::write(
+            paths.state_file(),
+            r#"{"schema":2,"proton":"ge:GE-Proton11-5","installed_at":1}"#,
+        )
+        .unwrap();
         let (mut launcher, _) = TestingRunner::new(app::app, size, |_| {}, 1.0);
         launcher.sync_and_update();
         launcher.poll(
@@ -138,5 +157,34 @@ mod tests {
             launcher.render_to_file(d.join("launcher.png"));
         }
         assert!(!launcher.render().is_empty());
+
+        // Compatibility recipes: every tab, then the compile screen.
+        state::TEST_SECTION.with(|s| s.set(Some(state::Section::Recipes)));
+        for (i, name) in [
+            "recipes",
+            "create",
+            "proton",
+            "sessions",
+            "community",
+            "build",
+        ]
+        .iter()
+        .enumerate()
+        {
+            recipes::TEST_TAB.with(|t| t.set(i as u8 % 5));
+            state::TEST_BUILD.with(|b| b.set(*name == "build"));
+            let (mut r, _) = TestingRunner::new(app::app, size, |_| {}, 1.0);
+            r.sync_and_update();
+            r.poll(
+                std::time::Duration::from_millis(50),
+                std::time::Duration::from_millis(800),
+            );
+            assert!(!r.render().is_empty());
+            if let Some(d) = &out {
+                r.render_to_file(d.join(format!("recipes-{name}.png")));
+            }
+        }
+        state::TEST_SECTION.with(|s| s.set(None));
+        state::TEST_BUILD.with(|b| b.set(false));
     }
 }
