@@ -71,7 +71,51 @@ pub struct Perf {
     pub p99_frametime_ms: f32,
     /// Frames slower than twice the median.
     pub stutters: u64,
+    /// Sustained slowdowns and what the GPU was doing during them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dips: Option<Dips>,
+    /// Single frames frozen for at least [HITCH_MS].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hitches: Option<Hitches>,
 }
+
+pub const HITCH_MS: f32 = 150.0;
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Hitches {
+    pub count: u32,
+    pub longest_ms: f32,
+    /// Set when most hitches come at a fixed interval: a timer, not load.
+    pub period_s: Option<f32>,
+}
+
+/// Runs of at least [DIP_MIN_FRAMES] frames below 2/3 of the median frame
+/// rate, compared with the rest of the session. Pairs are [normal, dip].
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Dips {
+    pub episodes: u32,
+    pub seconds: f32,
+    pub fps: f32,
+    pub gpu_load: Option<[f32; 2]>,
+    pub gpu_clock_mhz: Option<[f32; 2]>,
+    pub cpu_load: Option<[f32; 2]>,
+    pub cause: DipCause,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DipCause {
+    /// The GPU is saturated: too much to draw (resolution, avatars, world).
+    GpuBound,
+    /// The GPU clock falls during the dips: power management.
+    GpuClock,
+    /// The GPU idles during the dips: it waits on the game's main thread,
+    /// the VR compositor or loading, not on its own work.
+    GpuWaiting,
+    Unknown,
+}
+
+pub const DIP_MIN_FRAMES: usize = 5;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SessionReport {
@@ -320,15 +364,31 @@ pub fn scan_player_log(r: impl std::io::BufRead) -> LogProbe {
 /// Frame pacing from a MangoHud CSV log (`MANGOHUD_CONFIG=autostart_log=…`).
 pub fn parse_mangohud(text: &str) -> Option<Perf> {
     let mut lines = text.lines();
-    let header = lines.by_ref().find(|l| l.starts_with("fps,"))?;
-    let col = header.split(',').position(|c| c.trim() == "frametime")?;
-    let mut ft: Vec<f32> = lines
-        .filter_map(|l| l.split(',').nth(col)?.trim().parse::<f32>().ok())
-        .filter(|f| *f > 0.0 && f.is_finite())
+    let header: Vec<&str> = lines
+        .by_ref()
+        .find(|l| l.starts_with("fps,"))?
+        .split(',')
+        .map(str::trim)
         .collect();
-    if ft.len() < 100 {
+    let col = |name: &str| header.iter().position(|c| *c == name);
+    let ft_col = col("frametime")?;
+    let extra = [col("gpu_load"), col("gpu_core_clock"), col("cpu_load")];
+    let rows: Vec<(f32, [f32; 3])> = lines
+        .filter_map(|l| {
+            let v: Vec<&str> = l.split(',').collect();
+            let num = |c: Option<usize>| {
+                c.and_then(|c| v.get(c)?.trim().parse::<f32>().ok())
+                    .filter(|x| x.is_finite())
+                    .unwrap_or(0.0)
+            };
+            let ft = v.get(ft_col)?.trim().parse::<f32>().ok()?;
+            (ft > 0.0 && ft.is_finite()).then(|| (ft, extra.map(num)))
+        })
+        .collect();
+    if rows.len() < 100 {
         return None;
     }
+    let mut ft: Vec<f32> = rows.iter().map(|r| r.0).collect();
     let frames = ft.len() as u64;
     let total: f32 = ft.iter().sum();
     ft.sort_by(|a, b| a.total_cmp(b));
@@ -341,6 +401,103 @@ pub fn parse_mangohud(text: &str) -> Option<Perf> {
         low1_fps: 1000.0 / worst_avg,
         p99_frametime_ms: ft[(ft.len() * 99 / 100).min(ft.len() - 1)],
         stutters: ft.iter().filter(|f| **f > 2.0 * median).count() as u64,
+        dips: dips(&rows, median),
+        hitches: hitches(&rows),
+    })
+}
+
+fn hitches(rows: &[(f32, [f32; 3])]) -> Option<Hitches> {
+    let mut at = Vec::new();
+    let mut clock = 0.0f32;
+    let mut longest = 0.0f32;
+    for r in rows {
+        clock += r.0;
+        if r.0 >= HITCH_MS {
+            at.push(clock / 1000.0);
+            longest = longest.max(r.0);
+        }
+    }
+    if at.is_empty() {
+        return None;
+    }
+    // A timer shows as hitches followed by another exactly one period
+    // later, whatever loading hitches fall in between.
+    let follows = |p: f32| -> Vec<f32> {
+        at.iter()
+            .filter_map(|a| at.iter().map(|b| b - a).find(|d| (d - p).abs() < 0.03 * p))
+            .collect()
+    };
+    let period_s = at
+        .windows(2)
+        .map(|w| w[1] - w[0])
+        .filter(|g| *g >= 2.0)
+        .map(|g| (g, follows(g)))
+        .max_by_key(|(_, m)| m.len())
+        .filter(|(_, m)| m.len() >= 4 && m.len() * 5 >= at.len())
+        .map(|(_, m)| m.iter().sum::<f32>() / m.len() as f32);
+    Some(Hitches {
+        count: at.len() as u32,
+        longest_ms: longest,
+        period_s,
+    })
+}
+
+fn dips(rows: &[(f32, [f32; 3])], median: f32) -> Option<Dips> {
+    let slow: Vec<bool> = rows.iter().map(|r| r.0 > 1.5 * median).collect();
+    let mut in_dip = vec![false; rows.len()];
+    let mut episodes = 0;
+    let mut i = 0;
+    while i < rows.len() {
+        let start = i;
+        while i < rows.len() && slow[i] {
+            i += 1;
+        }
+        if i - start >= DIP_MIN_FRAMES {
+            episodes += 1;
+            in_dip[start..i].iter_mut().for_each(|d| *d = true);
+        }
+        i = i.max(start + 1);
+    }
+    if episodes == 0 {
+        return None;
+    }
+    let pair = |k: usize| {
+        let avg = |dip: bool| {
+            let v: Vec<f32> = rows
+                .iter()
+                .zip(&in_dip)
+                .filter(|(_, d)| **d == dip)
+                .map(|(r, _)| r.1[k])
+                .collect();
+            v.iter().sum::<f32>() / v.len().max(1) as f32
+        };
+        let p = [avg(false), avg(true)];
+        (p[0] > 0.0 || p[1] > 0.0).then_some(p)
+    };
+    let seconds_ms: f32 = rows
+        .iter()
+        .zip(&in_dip)
+        .filter(|(_, d)| **d)
+        .map(|(r, _)| r.0)
+        .sum();
+    let count = in_dip.iter().filter(|d| **d).count() as f32;
+    let (gpu_load, gpu_clock_mhz, cpu_load) = (pair(0), pair(1), pair(2));
+    let cause = match (gpu_load, gpu_clock_mhz) {
+        // A clock that falls while the GPU idles is a consequence, not a cause.
+        (Some([_, l]), Some([n, d])) if l >= 70.0 && d < 0.8 * n => DipCause::GpuClock,
+        (None, Some([n, d])) if d < 0.8 * n => DipCause::GpuClock,
+        (Some([_, d]), _) if d >= 85.0 => DipCause::GpuBound,
+        (Some([n, d]), _) if d < 70.0 || d + 15.0 < n => DipCause::GpuWaiting,
+        _ => DipCause::Unknown,
+    };
+    Some(Dips {
+        episodes,
+        seconds: seconds_ms / 1000.0,
+        fps: 1000.0 * count / seconds_ms,
+        gpu_load,
+        gpu_clock_mhz,
+        cpu_load,
+        cause,
     })
 }
 
@@ -481,6 +638,8 @@ mod tests {
                 low1_fps: 72.0,
                 p99_frametime_ms: 14.0,
                 stutters: 3,
+                dips: None,
+                hitches: None,
             }),
             exceptions: 0,
         }
@@ -569,6 +728,81 @@ mod tests {
         assert!((p.low1_fps - 25.0).abs() < 0.01);
         assert_eq!(p.stutters, 10);
         assert!(parse_mangohud("fps,frametime\n1,2\n").is_none());
+    }
+
+    #[test]
+    fn dips_name_their_cause() {
+        let csv = |dip: &str| {
+            let mut s = String::from("fps,frametime,cpu_load,gpu_load,gpu_core_clock\n");
+            for i in 0..2000 {
+                if (500..560).contains(&i) || (1500..1530).contains(&i) {
+                    s.push_str(dip);
+                } else {
+                    s.push_str("90,11.1,30,60,2400\n");
+                }
+            }
+            s
+        };
+        let d = parse_mangohud(&csv("30,33.3,30,25,2400\n"))
+            .unwrap()
+            .dips
+            .unwrap();
+        assert_eq!((d.episodes, d.cause), (2, DipCause::GpuWaiting));
+        assert!(
+            (d.fps - 30.0).abs() < 0.1 && (d.seconds - 3.0).abs() < 0.01,
+            "{d:?}"
+        );
+        assert_eq!(d.gpu_load, Some([60.0, 25.0]));
+        let d = parse_mangohud(&csv("30,33.3,30,99,2400\n"))
+            .unwrap()
+            .dips
+            .unwrap();
+        assert_eq!(d.cause, DipCause::GpuBound);
+        let d = parse_mangohud(&csv("30,33.3,30,99,900\n"))
+            .unwrap()
+            .dips
+            .unwrap();
+        assert_eq!(d.cause, DipCause::GpuClock);
+        let d = parse_mangohud(&csv("30,33.3,30,10,500\n"))
+            .unwrap()
+            .dips
+            .unwrap();
+        assert_eq!(d.cause, DipCause::GpuWaiting);
+        let mut spikes = String::from("fps,frametime\n");
+        for i in 0..1000 {
+            spikes.push_str(if i % 50 == 0 { "30,33\n" } else { "90,11\n" });
+        }
+        assert_eq!(parse_mangohud(&spikes).unwrap().dips, None);
+    }
+
+    #[test]
+    fn periodic_hitches_have_a_period() {
+        let mut s = String::from("fps,frametime\n");
+        for i in 0..20000 {
+            let ft = if i % 2700 == 0 && i > 0 {
+                480.0
+            } else if i == 4000 {
+                300.0
+            } else {
+                11.1
+            };
+            s.push_str(&format!("90,{ft}\n"));
+        }
+        let h = parse_mangohud(&s).unwrap().hitches.unwrap();
+        assert_eq!(h.count, 8);
+        assert_eq!(h.longest_ms, 480.0);
+        let p = h.period_s.unwrap();
+        assert!((p - 30.45).abs() < 0.6, "{h:?}");
+        let mut s = String::from("fps,frametime\n");
+        for i in 0..20000 {
+            let ft = if [900, 1300, 5000, 5200, 12000].contains(&i) {
+                300.0
+            } else {
+                11.1
+            };
+            s.push_str(&format!("90,{ft}\n"));
+        }
+        assert_eq!(parse_mangohud(&s).unwrap().hitches.unwrap().period_s, None);
     }
 
     #[test]

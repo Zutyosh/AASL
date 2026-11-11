@@ -8,6 +8,7 @@ pub mod bundle;
 pub mod catalog;
 pub mod community;
 pub mod recipe;
+pub mod timeline;
 
 pub use bundle::{ARCHIVE_FORMAT, PatchStatus};
 pub use catalog::{Bundle, Catalog, Match, TargetStatus};
