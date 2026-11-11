@@ -8,6 +8,7 @@ mod host;
 mod openxr;
 pub mod procs;
 mod tools;
+mod vrperf;
 
 pub use distro::{Distro, PackageManager};
 pub use host::{FakeHost, Host, RealHost};
@@ -16,6 +17,7 @@ pub use openxr::{
     active_runtime, installed_runtimes, openvr_runtime, share_root_for, vr_status,
 };
 pub use tools::{GpuInfo, PythonVersion, find_in_path, gpus, python_version, vulkan_icds};
+pub use vrperf::{Compositor, PowerProfile, VrTuning, power_profile, vr_tuning};
 
 use serde::Serialize;
 
@@ -30,6 +32,7 @@ pub struct SystemReport {
     pub vulkan_icds: Vec<String>,
     pub active_runtime: Option<OpenXrRuntime>,
     pub installed_runtimes: Vec<RuntimeKind>,
+    pub vr_tuning: VrTuning,
 }
 
 /// Tools the install and launch path calls on the host.
@@ -38,7 +41,9 @@ pub const REQUIRED_TOOLS: &[&str] = &["python3"];
 pub const OPTIONAL_TOOLS: &[&str] = &["magick", "convert", "vulkaninfo"];
 
 pub fn probe(host: &dyn Host) -> SystemReport {
+    let gpus = gpus(host);
     SystemReport {
+        vr_tuning: vr_tuning(host, &gpus),
         distro: Distro::detect(host),
         in_flatpak: host.exists("/.flatpak-info".as_ref()),
         python: python_version(host),
@@ -47,7 +52,7 @@ pub fn probe(host: &dyn Host) -> SystemReport {
             .filter(|t| find_in_path(host, t).is_none())
             .map(|t| t.to_string())
             .collect(),
-        gpus: gpus(host),
+        gpus,
         vulkan_icds: vulkan_icds(host),
         active_runtime: active_runtime(host),
         installed_runtimes: installed_runtimes(host),
