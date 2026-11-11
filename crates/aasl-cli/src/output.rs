@@ -68,6 +68,7 @@ pub fn status(s: &Status) -> String {
         format!("AASL {}", s.aasl_version),
         format!("Installed: {}", if s.installed { "yes" } else { "no" }),
         format!("Prefix: {}", s.prefix.display()),
+        format!("Recipe: {}", s.recipe),
         format!("Proton: {}", s.proton.as_deref().unwrap_or("none")),
         format!(
             "Patches: {}",

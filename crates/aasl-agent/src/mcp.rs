@@ -139,8 +139,92 @@ const TOOLS: &[ToolDef] = &[
         destructive: false,
     },
     ToolDef {
+        name: "recipe_list",
+        description: "Compatibility recipes: built-in and the user's, which one is in use, their Proton and ingredients, whether they carry custom code or compile anything.",
+        schema: no_args,
+        read_only: true,
+        destructive: false,
+    },
+    ToolDef {
+        name: "recipe_get",
+        description: "One recipe as TOML (the format recipe_save takes). export=true inlines every patch, for sharing.",
+        schema: || json!({"type": "object", "properties": {"id": {"type": "string"}, "export": {"type": "boolean"}}, "required": ["id"]}),
+        read_only: true,
+        destructive: false,
+    },
+    ToolDef {
+        name: "ingredient_list",
+        description: "The ingredient library recipes pick from: id, kind (patch or env), base Wine tree, patches, DLLs, superseded_if conditions, env.",
+        schema: no_args,
+        read_only: true,
+        destructive: false,
+    },
+    ToolDef {
+        name: "recipe_check",
+        description: "Validate a recipe TOML without saving it: errors, ingredients, custom code, whether it compiles anything.",
+        schema: || json!({"type": "object", "properties": {"toml": {"type": "string"}}, "required": ["toml"]}),
+        read_only: true,
+        destructive: false,
+    },
+    ToolDef {
+        name: "recipe_save",
+        description: "Save a user recipe from TOML (create or replace). Recipes are declarative: format, id, title, description, proton (provider:tag, provider:latest or omitted), ingredients (ids in order), env, and [[ingredient]] tables with inline patches for new fixes. Needs the user's approval.",
+        schema: || json!({"type": "object", "properties": {"toml": {"type": "string"}, "confirm": {"type": "boolean"}}, "required": ["toml"]}),
+        read_only: false,
+        destructive: true,
+    },
+    ToolDef {
+        name: "recipe_build",
+        description: "Build a recipe's bundle (default: the recipe in use, on its Proton). Cached by recipe, Proton and builder. Long; follow with tail_logs. Needs the user's approval.",
+        schema: || json!({"type": "object", "properties": {"id": {"type": "string"}, "proton": {"type": "string"}, "force": {"type": "boolean"}, "confirm": {"type": "boolean"}}}),
+        read_only: false,
+        destructive: true,
+    },
+    ToolDef {
+        name: "recipe_use",
+        description: "Make Somnium use a recipe: switch to its Proton if it pins one, build when nothing fits, then repair. Needs the user's approval.",
+        schema: || json!({"type": "object", "properties": {"id": {"type": "string"}, "confirm": {"type": "boolean"}}, "required": ["id"]}),
+        read_only: false,
+        destructive: true,
+    },
+    ToolDef {
+        name: "session_list",
+        description: "Saved session reports, newest first: recipe and its key, hardware, duration, worlds entered, video opens/failures, crash (in_game or on_exit), MangoHud frame pacing (avg fps, 1 % low, p99 frametime, stutters).",
+        schema: no_args,
+        read_only: true,
+        destructive: false,
+    },
+    ToolDef {
+        name: "recipe_verdict",
+        description: "How a recipe stands on this machine's session reports, with the same rules CI applies to community submissions (status, hours, configurations, crashes, video success, pacing, what is missing).",
+        schema: || json!({"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}),
+        read_only: true,
+        destructive: false,
+    },
+    ToolDef {
+        name: "recipe_share",
+        description: "Prepare a community submission: the GitHub form URL (prefilled when it fits) plus the recipe and reports to paste. Nothing is sent; the user opens the link.",
+        schema: || json!({"type": "object", "properties": {"id": {"type": "string"}, "reports": {"type": "array", "items": {"type": "string"}}}, "required": ["id"]}),
+        read_only: true,
+        destructive: false,
+    },
+    ToolDef {
+        name: "community_list",
+        description: "Community recipes from AASL's repository with their verdicts.",
+        schema: no_args,
+        read_only: true,
+        destructive: false,
+    },
+    ToolDef {
+        name: "community_install",
+        description: "Save a community recipe as one of the user's (does not switch to it). Needs the user's approval.",
+        schema: || json!({"type": "object", "properties": {"id": {"type": "string"}, "confirm": {"type": "boolean"}}, "required": ["id"]}),
+        read_only: false,
+        destructive: true,
+    },
+    ToolDef {
         name: "patch_list",
-        description: "Patch files AASL builds from (series, file, subject, sha256) and the directory they live in.",
+        description: "Every patch of the ingredient library (ingredient, file, subject, sha256).",
         schema: no_args,
         read_only: true,
         destructive: false,
@@ -154,15 +238,15 @@ const TOOLS: &[ToolDef] = &[
     },
     ToolDef {
         name: "patch_plan",
-        description: "What building a bundle for a Proton would do: Wine repo and commit, series, engine. Nothing runs.",
-        schema: || json!({"type": "object", "properties": {"id": {"type": "string"}, "series": {"type": "array", "items": {"type": "string"}}, "ffmpeg": {"type": "boolean"}}, "required": ["id"]}),
+        description: "What building the recipe in use for a Proton would do: Wine repo and commit, Wine trees, bundle name, engine. Nothing runs.",
+        schema: || json!({"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}),
         read_only: true,
         destructive: false,
     },
     ToolDef {
         name: "patch_build",
-        description: "Build a patch bundle for a Proton in a container. Takes a long time; follow it with tail_logs. Needs the user's approval.",
-        schema: || json!({"type": "object", "properties": {"id": {"type": "string"}, "series": {"type": "array", "items": {"type": "string"}}, "ffmpeg": {"type": "boolean"}, "confirm": {"type": "boolean"}}, "required": ["id"]}),
+        description: "Rebuild the recipe in use for a Proton in a container. Takes a long time; follow it with tail_logs. Needs the user's approval.",
+        schema: || json!({"type": "object", "properties": {"id": {"type": "string"}, "confirm": {"type": "boolean"}}, "required": ["id"]}),
         read_only: false,
         destructive: true,
     },
@@ -206,15 +290,12 @@ fn proton_arg(args: &Value) -> Result<aasl_components::ProtonId, String> {
         .map_err(|e| e.to_string())
 }
 
-fn series_arg(args: &Value) -> Vec<String> {
-    args.get("series")
-        .and_then(Value::as_array)
-        .map(|a| {
-            a.iter()
-                .filter_map(|v| v.as_str().map(str::to_string))
-                .collect()
-        })
-        .unwrap_or_default()
+fn str_arg(args: &Value, key: &str) -> Result<String, String> {
+    args.get(key)
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| format!("missing {key}"))
 }
 
 fn rpc_ok(id: &Value, result: Value) -> Value {
@@ -268,7 +349,7 @@ impl Server {
                     "protocolVersion": PROTOCOL_VERSION,
                     "capabilities": {"tools": {}, "resources": {}},
                     "serverInfo": {"name": "aasl", "title": "AASL (Somnium Space on Linux)", "version": env!("CARGO_PKG_VERSION")},
-                    "instructions": "Start with run_doctor, status and vr_status. Read tail_logs for evidence. Proton and patch problems: proton_installed, patch_status, patch_list/patch_read, patch_plan, then patch_build and patch_apply to test a change. Use apply_fix with dry_run first; actions that change the setup need the user's approval."
+                    "instructions": "Start with run_doctor, status and vr_status. Read tail_logs for evidence. Compatibility is described by recipes (recipe_list, recipe_get, ingredient_list): a Proton plus ingredients. To change it, write a recipe (recipe_check, then recipe_save), recipe_build, then recipe_use. Each play session leaves a report (session_list); recipe_verdict judges a recipe on them, and recipe_share prepares a community submission once it holds up. patch_status, patch_list/patch_read and patch_plan show the details. Use apply_fix with dry_run first; actions that change the setup need the user's approval."
                 }),
             ),
             "ping" => rpc_ok(&id, json!({})),
@@ -399,37 +480,80 @@ impl Server {
                 s.proton_use(id.clone(), force).await.map(|_| json!({"proton": id.to_string()})).map_err(|e| e.to_string())
             }
             "patch_status" => to(serde_json::to_value(s.status().patches)),
-            "patch_list" => {
-                let dir = s.patches_dir().map_err(|e| e.to_string())?;
-                let list = s.patch_list().map_err(|e| e.to_string())?;
-                Ok(json!({"dir": dir, "patches": list}))
+            "recipe_list" => s.recipes().map_err(|e| e.to_string()).and_then(|v| to(serde_json::to_value(v))),
+            "recipe_get" => {
+                let id = str_arg(args, "id")?;
+                let r = if args.get("export").and_then(Value::as_bool).unwrap_or(false) {
+                    s.recipe_export(&id)
+                } else {
+                    s.recipe(&id).and_then(|r| r.to_toml())
+                };
+                r.map(|t| json!({"id": id, "toml": t})).map_err(|e| e.to_string())
             }
-            "patch_read" => {
-                let name = args.get("name").and_then(Value::as_str).unwrap_or_default();
-                if name.contains('/') || name.contains("..") || !name.ends_with(".patch") {
-                    return Err("give a bare .patch file name from patch_list".into());
+            "ingredient_list" => s.library().map_err(|e| e.to_string()).and_then(|l| to(serde_json::to_value(l.ingredients))),
+            "recipe_check" => s.recipe_check(&str_arg(args, "toml")?).map_err(|e| e.to_string()).and_then(|i| to(serde_json::to_value(i))),
+            "recipe_save" => {
+                let text = str_arg(args, "toml")?;
+                let info = s.recipe_check(&text).map_err(|e| e.to_string())?;
+                let what = if info.custom_code { " It brings its own Wine patches." } else { "" };
+                if !self.approved(format!("An agent wants to save the recipe {}.{what}", info.id), args).await {
+                    return Err(NOT_APPROVED.into());
                 }
-                let dir = s.patches_dir().map_err(|e| e.to_string())?;
-                ["wine", "ge"]
-                    .iter()
-                    .map(|d| dir.join(d).join(name))
-                    .find(|p| p.exists())
-                    .and_then(|p| std::fs::read_to_string(p).ok())
-                    .map(|text| json!({"name": name, "text": text}))
-                    .ok_or_else(|| format!("no patch named {name}"))
+                s.recipe_import(&text).map_err(|e| e.to_string()).and_then(|i| to(serde_json::to_value(i)))
+            }
+            "recipe_build" => {
+                let id = args.get("id").and_then(Value::as_str).map(str::to_string);
+                let proton = match args.get("proton").and_then(Value::as_str) {
+                    Some(p) => Some(aasl_components::ProtonId::parse(p).map_err(|e| e.to_string())?),
+                    None => None,
+                };
+                let force = args.get("force").and_then(Value::as_bool).unwrap_or(false);
+                let which = id.clone().unwrap_or_else(|| "in use".into());
+                if !self.approved(format!("An agent wants to build the recipe {which} (long, uses the CPU)."), args).await {
+                    return Err(NOT_APPROVED.into());
+                }
+                s.recipe_build(id.as_deref(), proton, force).await.map(|p| json!({"bundle": p})).map_err(|e| e.to_string())
+            }
+            "recipe_use" => {
+                let id = str_arg(args, "id")?;
+                if !self.approved(format!("An agent wants Somnium to use the recipe {id}."), args).await {
+                    return Err(NOT_APPROVED.into());
+                }
+                s.recipe_use(&id).await.map(|_| json!({"recipe": id})).map_err(|e| e.to_string())
+            }
+            "session_list" => to(serde_json::to_value(s.sessions())),
+            "recipe_verdict" => s.recipe_verdict(&str_arg(args, "id")?).map_err(|e| e.to_string()).and_then(|v| to(serde_json::to_value(v))),
+            "recipe_share" => {
+                let reports: Vec<String> = args
+                    .get("reports")
+                    .and_then(Value::as_array)
+                    .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+                    .unwrap_or_default();
+                s.recipe_share(&str_arg(args, "id")?, &reports).map_err(|e| e.to_string()).and_then(|v| to(serde_json::to_value(v)))
+            }
+            "community_list" => s.community().await.map_err(|e| e.to_string()).and_then(|v| to(serde_json::to_value(v))),
+            "community_install" => {
+                let id = str_arg(args, "id")?;
+                if !self.approved(format!("An agent wants to save the community recipe {id}."), args).await {
+                    return Err(NOT_APPROVED.into());
+                }
+                s.community_install(&id).await.map_err(|e| e.to_string()).and_then(|v| to(serde_json::to_value(v)))
+            }
+            "patch_list" => s.patch_list().map_err(|e| e.to_string()).and_then(|v| to(serde_json::to_value(v))),
+            "patch_read" => {
+                let name = str_arg(args, "name")?;
+                s.patch_read(&name).map(|text| json!({"name": name, "text": text})).map_err(|e| e.to_string())
             }
             "patch_plan" => {
                 let id = proton_arg(args)?;
-                let ffmpeg = args.get("ffmpeg").and_then(Value::as_bool).unwrap_or(false);
-                s.patch_plan(&id, ffmpeg, &series_arg(args)).await.map_err(|e| e.to_string()).and_then(|p| to(serde_json::to_value(p)))
+                s.patch_plan(&id).await.map_err(|e| e.to_string()).and_then(|p| to(serde_json::to_value(p)))
             }
             "patch_build" => {
                 let id = proton_arg(args)?;
                 if !self.approved(format!("An agent wants to build a patch bundle for {id} (long, uses the CPU)."), args).await {
                     return Err(NOT_APPROVED.into());
                 }
-                let ffmpeg = args.get("ffmpeg").and_then(Value::as_bool).unwrap_or(false);
-                s.patch_build(id, ffmpeg, &series_arg(args)).await.map(|p| json!({"bundle": p})).map_err(|e| e.to_string())
+                s.patch_build(id).await.map(|p| json!({"bundle": p})).map_err(|e| e.to_string())
             }
             "patch_apply" => {
                 let path = args.get("path").and_then(Value::as_str).unwrap_or_default().to_string();

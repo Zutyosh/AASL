@@ -5,7 +5,7 @@
 mod commands;
 mod output;
 
-use commands::{PatchCmd, ProtonCmd, parse_id};
+use commands::{CommunityCmd, PatchCmd, ProtonCmd, RecipeCmd, SessionCmd, parse_id};
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -104,6 +104,21 @@ enum Cmd {
         #[command(subcommand)]
         cmd: ProtonCmd,
     },
+    /// Compatibility recipes: a Proton plus the fixes Somnium needs on it.
+    Recipe {
+        #[command(subcommand)]
+        cmd: RecipeCmd,
+    },
+    /// Session reports: what each play session showed about the recipe.
+    Session {
+        #[command(subcommand)]
+        cmd: SessionCmd,
+    },
+    /// Community recipes from AASL's repository.
+    Community {
+        #[command(subcommand)]
+        cmd: CommunityCmd,
+    },
     /// Somnium's Wine patches: status, sources, building bundles.
     Patch {
         #[command(subcommand)]
@@ -119,6 +134,15 @@ enum Cmd {
 }
 
 fn main() -> ExitCode {
+    // Behave like other CLI tools when piped into `head`: exit quietly on
+    // a closed stdout instead of panicking in println!.
+    // SAFETY: called first thing, before any thread exists.
+    unsafe {
+        let _ = nix::sys::signal::signal(
+            nix::sys::signal::Signal::SIGPIPE,
+            nix::sys::signal::SigHandler::SigDfl,
+        );
+    }
     let cli = Cli::parse();
     let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
     rt.block_on(run(cli))
@@ -162,6 +186,7 @@ async fn run(cli: Cli) -> ExitCode {
                 somnium_installer: installer,
                 local_bundle: bundle,
                 aasl_exe: std::env::current_exe().ok(),
+                ..Default::default()
             };
             out.result(svc.install(opts).await, |_| {
                 "Somnium Space is installed. Start it with `aasl launch` or from the menu.".into()
@@ -235,6 +260,9 @@ async fn run(cli: Cli) -> ExitCode {
         }
         Cmd::Proton { cmd } => commands::proton(&out, &svc, cmd).await,
         Cmd::Patch { cmd } => commands::patch(&out, &svc, cmd).await,
+        Cmd::Recipe { cmd } => commands::recipe(&out, &svc, cmd).await,
+        Cmd::Session { cmd } => commands::session(&out, &svc, cmd).await,
+        Cmd::Community { cmd } => commands::community(&out, &svc, cmd).await,
         Cmd::Report => {
             let r = svc.report().await;
             println!("{r}");
