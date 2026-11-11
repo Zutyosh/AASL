@@ -7,6 +7,7 @@ use aasl_components::ProtonId;
 use aasl_components::sources::LAUNCHER_REL_PATH;
 use aasl_core::{Config, Paths, Severity};
 use aasl_install::InstallState;
+use aasl_patches::community::{DipCause, Perf};
 use aasl_patches::{PatchStatus, TargetStatus};
 use aasl_system::procs::ProcInfo;
 use aasl_system::{SystemReport, VrStatus};
@@ -115,6 +116,8 @@ pub struct DiagContext {
     pub github_reachable: Option<bool>,
     /// Tail of launch.log.
     pub launch_log: Vec<String>,
+    /// Frame pacing of the last recorded session.
+    pub last_perf: Option<Perf>,
     pub exists: Box<dyn Fn(&std::path::Path) -> bool + Send + Sync>,
 }
 
@@ -173,6 +176,10 @@ pub const CHECKS: &[Check] = &[
     Check {
         id: "launch_log",
         run: launch_log,
+    },
+    Check {
+        id: "vr_perf",
+        run: vr_perf,
     },
 ];
 
@@ -463,6 +470,98 @@ const LOG_PATTERNS: &[(&str, Severity, &str, &str)] = &[
     ),
 ];
 
+fn vr_perf(ctx: &DiagContext) -> Vec<Finding> {
+    let mut out = Vec::new();
+    let t = &ctx.system.vr_tuning;
+    if let Some(c) = &t.compositor
+        && c.realtime == Some(false)
+    {
+        let path = c.path.display();
+        out.push(
+            Finding::new("vr_perf", Severity::Warn, format!("{} cannot run its compositor at realtime priority", c.name))
+                .evidence(format!("getcap {path}: no cap_sys_nice"))
+                .advice(format!("When the CPU is busy the compositor misses its deadline and the headset rate halves (90 to 45 or lower) for a while. Grant it once, then restart it: sudo setcap CAP_SYS_NICE=+ep {path}. A package update removes it.")),
+        );
+    }
+    for p in &t.amd_power {
+        if let Some(vr) = p.vr_index
+            && p.active != "VR"
+        {
+            let file = format!("/sys/class/drm/{}/device/pp_power_profile_mode", p.card);
+            out.push(
+                Finding::new("vr_perf", Severity::Warn, "The AMD GPU is not in its VR power profile")
+                    .evidence(format!("{file}: {} active", p.active))
+                    .advice(format!("VR load comes in short bursts and the default profile lets the clocks fall between them, so some frames miss the headset deadline. SteamVR switches to the VR profile itself, WiVRn and Monado do not. Until reboot: echo {vr} | sudo tee {file}, or set it permanently in LACT or CoreCtrl.")),
+            );
+        }
+    }
+    if !t.overlays.is_empty() {
+        out.push(
+            Finding::new("vr_perf", Severity::Info, format!("XR overlay running: {}", t.overlays.join(", ")))
+                .advice("It is a second client of the compositor and takes focus from the game when shown. If slowdowns line up with it, close it to compare."),
+        );
+    }
+    if let Some(h) = ctx.last_perf.and_then(|p| p.hitches) {
+        let ev = format!(
+            "last session: {} freezes, the longest {:.0} ms",
+            h.count, h.longest_ms
+        );
+        out.push(match h.period_s {
+            Some(p) => Finding::new("vr_perf", Severity::Warn, format!("The game freezes every {p:.1} s"))
+                .evidence(ev)
+                .advice("Freezes on a fixed clock come from a timer inside the game (a periodic cleanup, a poll, a network or voice task), not from the GPU or the compositor. Note what you were doing and compare with voice chat or the microphone off."),
+            None => Finding::new("vr_perf", Severity::Info, "Freezes in the last session")
+                .evidence(ev)
+                .advice("Irregular freezes usually line up with loading: worlds, avatars joining, videos."),
+        });
+    }
+    if let Some(d) = ctx.last_perf.and_then(|p| p.dips) {
+        let pair = |v: Option<[f32; 2]>, unit: &str| {
+            v.map(|[n, d]| format!("{n:.0}{unit} normally, {d:.0}{unit} during them"))
+        };
+        let (sev, title, advice) = match d.cause {
+            DipCause::GpuWaiting => (
+                Severity::Warn,
+                "The GPU idles during the slowdowns",
+                "Frames are late without the GPU being busy: the game's main thread, the compositor or loading (avatars, worlds, video) holds them back. Check the findings above first; a scene with many avatars on a 6-core CPU is the usual limit.",
+            ),
+            DipCause::GpuClock => (
+                Severity::Warn,
+                "The GPU clock drops during the slowdowns",
+                "Power management lowers the clock just when frames need it. Use the VR power profile (see above) or a fixed performance level.",
+            ),
+            DipCause::GpuBound => (
+                Severity::Info,
+                "The GPU is saturated during the slowdowns",
+                "Lower the resolution in WiVRn or the in-game graphics settings, or hide distant avatars.",
+            ),
+            DipCause::Unknown => (
+                Severity::Info,
+                "Slowdowns in the last session",
+                "MangoHud did not report GPU load, so the cause is unknown.",
+            ),
+        };
+        let mut f = Finding::new("vr_perf", sev, title)
+            .evidence(format!(
+                "last session: {} slowdowns, {:.0} s in total, {:.0} fps during them",
+                d.episodes, d.seconds, d.fps
+            ))
+            .advice(advice);
+        for e in [
+            pair(d.gpu_load, " % GPU"),
+            pair(d.gpu_clock_mhz, " MHz"),
+            pair(d.cpu_load, " % CPU (all cores)"),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            f = f.evidence(e);
+        }
+        out.push(f);
+    }
+    out
+}
+
 fn launch_log(ctx: &DiagContext) -> Vec<Finding> {
     let mut out = Vec::new();
     for (needle, sev, title, advice) in LOG_PATTERNS {
@@ -527,6 +626,7 @@ mod tests {
             processes: vec![],
             github_reachable: Some(true),
             launch_log: vec![],
+            last_perf: None,
             exists: Box::new(move |p: &Path| set.contains(p)),
         };
         f(&mut c);

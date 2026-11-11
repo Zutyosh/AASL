@@ -396,6 +396,7 @@ impl Service {
             processes: self.processes(),
             github_reachable: network,
             launch_log,
+            last_perf: self.sessions().first().and_then(|s| s.report.perf),
             exists: Box::new(|p| p.exists()),
         }
     }
