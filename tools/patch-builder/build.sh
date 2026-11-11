@@ -41,12 +41,33 @@ fetch_commit() { # dir repo commit
         git init -q "$dir"
         git -C "$dir" remote add origin "$repo"
     fi
-    if [ "$(git -C "$dir" rev-parse HEAD 2>/dev/null || true)" != "$commit" ]; then
-        info "fetching $repo @ $commit"
-        git -C "$dir" fetch -q --depth 1 origin "$commit"
-        git -C "$dir" checkout -q -f FETCH_HEAD
-        git -C "$dir" clean -qfdx
+    if [ "$(git -C "$dir" rev-parse HEAD 2>/dev/null || true)" = "$commit" ]; then
+        return 0
     fi
+    # Already fetched (a previous build's patches sit on top): go back to it,
+    # keeping the build directory so make stays incremental.
+    if git -C "$dir" cat-file -e "$commit^{commit}" 2>/dev/null; then
+        git -C "$dir" checkout -q -f "$commit"
+        return 0
+    fi
+    info "fetching $repo @ $commit"
+    git -C "$dir" fetch -q --depth 1 origin "$commit"
+    git -C "$dir" checkout -q -f FETCH_HEAD
+    git -C "$dir" clean -qfdx
+}
+
+# superseded tree list patch -> true when <list> says <patch> is already in <tree>
+superseded() {
+    local tree="$1" list="$2" name="$3" p cond file needle
+    [ -f "$list" ] || return 1
+    while read -r p cond file needle; do
+        [ "$p" = "$name" ] || continue
+        case "$cond" in
+            has)   grep -qF -- "$needle" "$tree/$file" 2>/dev/null && return 0 ;;
+            lacks) [ -f "$tree/$file" ] && ! grep -qF -- "$needle" "$tree/$file" && return 0 ;;
+        esac
+    done < <(grep -v '^[[:space:]]*\(#\|$\)' "$list")
+    return 1
 }
 
 apply_series_patches() { # tree dir
@@ -54,6 +75,10 @@ apply_series_patches() { # tree dir
     git -C "$tree" config user.email aasl@localhost
     git -C "$tree" config user.name aasl
     for p in "$PATCHES_DIR/$dir"/*.patch; do
+        if superseded "$tree" "$PATCHES_DIR/$dir/superseded" "$(basename "$p")"; then
+            info "skip $(basename "$p"): this Proton already carries the fix"
+            continue
+        fi
         info "apply $(basename "$p")"
         git -C "$tree" am -q --3way "$p" || { git -C "$tree" am --abort || true; die "$(basename "$p") does not apply to this tree"; }
     done
@@ -79,6 +104,43 @@ prep_ge_video_rework() { # tree
     git -C "$tree" add -A >/dev/null && git -C "$tree" -c user.email=aasl@localhost -c user.name=aasl commit -qm "GE video rework" || true
 }
 
+# GE-Proton's full Wine preparation: the same wine-staging, game fixes,
+# hotfixes and video rework its release was built with, taken from the
+# tag's own patches/protonprep-valve-staging.sh. DLLs built on this tree
+# match the ones GE ships, plus our patches; the rework-only tree lacked
+# everything staging adds (kernelbase included).
+prep_ge_full() { # tree
+    local tree="$1" ge="$WORK_DIR/proton-$PROTON_TAG" script="$WORK_DIR/ge-wine-prep.sh" c url rc=0
+    fetch_commit "$ge" "$PROTON_REPO" "$(git ls-remote "$PROTON_REPO" "refs/tags/$PROTON_TAG" | cut -f1)"
+    local prep="$ge/patches/protonprep-valve-staging.sh"
+    if [ ! -f "$prep" ]; then
+        info "$PROTON_TAG has no protonprep-valve-staging.sh; applying the video rework only"
+        prep_ge_video_rework "$tree"
+        return
+    fi
+    c=$(git -C "$ge" ls-tree HEAD wine-staging | awk '{print $3}')
+    url=$(git -C "$ge" config -f .gitmodules submodule.wine-staging.url)
+    [ -n "$c" ] && [ -n "$url" ] || die "$PROTON_TAG: cannot find its wine-staging submodule"
+    fetch_commit "$ge/wine-staging" "$url" "$c"
+    # The script reverts upstream commits; a shallow tree needs them and their parents.
+    for c in $(grep -o 'git revert --no-commit [0-9a-f]*' "$prep" | awk '{print $4}'); do
+        git -C "$tree" fetch -q --depth 2 origin "$c" || die "cannot fetch $c to revert it"
+    done
+    {
+        printf 'apply_patch() { patch -Np1 < "$1"; }\n'
+        printf 'apply_all_in_dir() { local p; for p in "$1"/*.patch; do apply_patch "$p"; done; }\n'
+        sed -n '/^### (2) WINE PATCHING ###/,/^### END WINE PATCHING ###/p' "$prep"
+    } > "$script"
+    info "GE wine preparation (staging, game fixes, video rework), log: ge-wine-prep.log"
+    rm -rf "$ge/wine" && mv "$tree" "$ge/wine"
+    ( cd "$ge" && bash "$script" ) > "$WORK_DIR/ge-wine-prep.log" 2>&1 || rc=$?
+    mv "$ge/wine" "$tree" && mkdir -p "$ge/wine"
+    [ "$rc" -eq 0 ] || info "GE preparation exited with $rc (GE's own script tolerates failing hunks)"
+    c=$(grep -c '^Hunk .*FAILED\|^[0-9]* out of [0-9]* hunks* FAILED' "$WORK_DIR/ge-wine-prep.log" || true)
+    info "GE preparation done; failed hunks: $c"
+    git -C "$tree" add -A >/dev/null && git -C "$tree" -c user.email=aasl@localhost -c user.name=aasl commit -qm "GE wine preparation" || true
+}
+
 generate_proton_sources() { # tree
     local tree="$1"
     ( cd "$tree" && autoreconf -f >/dev/null 2>&1 ) || die "autoreconf failed"
@@ -92,7 +154,7 @@ generate_proton_sources() { # tree
 build_dlls() { # tree dll...
     local tree="$1"; shift
     mkdir -p "$tree/build"
-    [ -f "$tree/build/Makefile" ] || ( cd "$tree/build" && ../configure --enable-win64 >/dev/null ) || die "configure failed"
+    [ -f "$tree/build/Makefile" ] || ( cd "$tree/build" && ../configure --enable-win64 --without-x --without-wayland >/dev/null ) || die "configure failed"
     local d
     for d in "$@"; do
         info "make dlls/$d"
@@ -100,7 +162,23 @@ build_dlls() { # tree dll...
     done
 }
 
-stage() { install -Dm644 "$1" "$2"; info "$(printf '%10d  %s' "$(stat -c%s "$2")" "${2#$STAGE/}")"; }
+# Debug info doubles the DLLs; Proton ships them stripped, so do the same.
+stage() {
+    install -Dm644 "$1" "$2"
+    case "$2" in
+        *.dll) x86_64-w64-mingw32-strip --strip-debug "$2" ;;
+        *.so*) strip --strip-unneeded "$2" ;;
+    esac
+    info "$(printf '%10d  %s' "$(stat -c%s "$2")" "${2#$STAGE/}")"
+}
+
+# touched tree rev name... -> the names whose dlls/<name>/ changed since rev
+touched() {
+    local tree="$1" rev="$2" d; shift 2
+    for d in "$@"; do
+        git -C "$tree" diff --quiet "$rev" HEAD -- "dlls/$d/" || printf '%s ' "$d"
+    done
+}
 
 build_series() { # id
     local id="$1" dir base dlls unix tree d
@@ -109,23 +187,35 @@ build_series() { # id
     [ -n "$dir" ] || die "unknown series $id"
     say "Series $id ($base)"
     if [ "$base" = upstream ]; then
-        tree="$WORK_DIR/wine-upstream-$id"
-        fetch_commit "$tree" "$(series_field "$id" upstream_repo)" "$(series_field "$id" upstream_commit)"
+        local commit; commit=$(series_field "$id" upstream_commit)
+        # Named by commit: recipes sharing an upstream base share its build.
+        tree="$WORK_DIR/wine-upstream-${commit:0:12}"
+        fetch_commit "$tree" "$(series_field "$id" upstream_repo)" "$commit"
     else
         tree="$WORK_DIR/wine-$PROVIDER-$PROTON_TAG"
+        [ -s "$tree/.aasl-prepared" ] || rm -f "$tree/.aasl-prepared"
         if [ ! -f "$tree/.aasl-prepared" ]; then
             fetch_commit "$tree" "$WINE_REPO" "$WINE_COMMIT"
             if [ "$(series_field "$id" requires_prep)" = ge-video-rework ]; then
                 if [ "$PROVIDER" = ge ]; then
-                    prep_ge_video_rework "$tree"
+                    prep_ge_full "$tree"
                 elif [ ! -f "$tree/dlls/winedmo/unix_demuxer.c" ]; then
                     die "series $id needs the winedmo media backend, which $PROVIDER:$PROTON_TAG's Wine does not have. Build with SERIES=tls only."
                 fi
             fi
-            touch "$tree/.aasl-prepared"
+            git -C "$tree" rev-parse HEAD > "$tree/.aasl-prepared"
         fi
+        # Start each build from the prepared tree, not from a previous run's patches.
+        git -C "$tree" reset -q --hard "$(cat "$tree/.aasl-prepared")"
     fi
+    local before; before=$(git -C "$tree" rev-parse HEAD)
     apply_series_patches "$tree" "$dir"
+    if [ "$base" = proton ]; then
+        # Ship only what the patches changed: when this Proton already
+        # carries a fix, its own build of that DLL is newer than ours.
+        dlls=$(touched "$tree" "$before" $dlls); unix=$(touched "$tree" "$before" $unix)
+        [ -n "$dlls" ] || { info "nothing to build: this Proton already has every fix of $id"; return 0; }
+    fi
     [ "$base" = proton ] && generate_proton_sources "$tree"
     # shellcheck disable=SC2086
     build_dlls "$tree" $dlls

@@ -1,0 +1,78 @@
+From c970b0d9f4afb30c728a22fb811d31efb2afd1d3 Mon Sep 17 00:00:00 2001
+From: AASL <aasl@localhost>
+Date: Wed, 11 Nov 2026 04:06:22 +0100
+Subject: [PATCH] kernelbase: Insert yt-dlp options after argv[0], not at the
+ end.
+
+Somnium Space calls yt-dlp as `yt-dlp.exe <options> -- <url>`. The hook
+appended --extractor-args after the URL, past the "--", so yt-dlp took
+"--extractor-args" and "youtube:player_client=android" as two more URLs
+and failed with "'--extractor-args' is not a valid URL" and
+"Unsupported url scheme: "youtube"": YouTube videos never played.
+
+Insert the options right after the program name instead. Also stop
+freeing the command line when it is still the caller's buffer
+(CreateProcessW with an application name keeps cmd_line as is).
+---
+ dlls/kernelbase/process.c | 24 ++++++++++++++++++++----
+ 1 file changed, 20 insertions(+), 4 deletions(-)
+
+diff --git a/dlls/kernelbase/process.c b/dlls/kernelbase/process.c
+index 2871dc5f..a3cde9f5 100644
+--- a/dlls/kernelbase/process.c
++++ b/dlls/kernelbase/process.c
+@@ -589,7 +589,8 @@ static int battleye_launcher_redirect_hack( const WCHAR *app_name, WCHAR *new_na
+     return 1;
+ }
+ 
+-static int ytdlp_hack( const WCHAR *app_name, WCHAR *new_name, DWORD new_name_len, WCHAR **cmdline )
++static int ytdlp_hack( const WCHAR *app_name, WCHAR *new_name, DWORD new_name_len, WCHAR **cmdline,
++                        const WCHAR *caller_cmdline )
+ {
+     static const WCHAR ytdlp_exeW[] = L"yt-dlp.exe";
+     static const size_t ytdlp_exeW_len = ARRAY_SIZE(ytdlp_exeW) - 1;
+@@ -636,7 +637,20 @@ static int ytdlp_hack( const WCHAR *app_name, WCHAR *new_name, DWORD new_name_le
+         wcscpy( new_name, ytdlp_path );
+     if (new_cmdline)
+     {
+-        wcscpy( new_cmdline, *cmdline );
++        /* Insert the options right after argv[0]: callers end their own
++         * options with "--" before the URL, and anything appended after it
++         * is taken as another URL. */
++        const WCHAR *rest = *cmdline;
++        if (*rest == '"')
++        {
++            rest = wcschr( rest + 1, '"' );
++            rest = rest ? rest + 1 : *cmdline + wcslen( *cmdline );
++        }
++        else
++        {
++            while (*rest && *rest != ' ' && *rest != '\t') rest++;
++        }
++        lstrcpynW( new_cmdline, *cmdline, rest - *cmdline + 1 );
+         if (browser[0])
+         {
+             wcscat( new_cmdline, cookiesfrombrowserW );
+@@ -647,7 +661,9 @@ static int ytdlp_hack( const WCHAR *app_name, WCHAR *new_name, DWORD new_name_le
+             wcscat( new_cmdline, extractorargsW );
+             wcscat( new_cmdline, extractor_args );
+         }
+-        HeapFree( GetProcessHeap(), 0, *cmdline );
++        wcscat( new_cmdline, rest );
++        /* The command line may still be the caller's own buffer. */
++        if (*cmdline != caller_cmdline) HeapFree( GetProcessHeap(), 0, *cmdline );
+         *cmdline = new_cmdline;
+     }
+     return ytdlp_path[0];
+@@ -838,7 +854,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR
+     if (battleye_launcher_redirect_hack( app_name, name, ARRAY_SIZE(name), &orig_app_name, product_name ))
+         app_name = name;
+ 
+-    if (ytdlp_hack( app_name, name, ARRAY_SIZE(name), &tidy_cmdline ))
++    if (ytdlp_hack( app_name, name, ARRAY_SIZE(name), &tidy_cmdline, cmd_line ))
+         app_name = name;
+ 
+     /* Warn if unsupported features are used */
+-- 
+2.56.0
+

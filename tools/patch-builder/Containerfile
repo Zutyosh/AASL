@@ -6,7 +6,7 @@ FROM docker.io/library/archlinux:base-devel
 RUN pacman -Syu --noconfirm --needed \
         git curl tar xz python nasm mingw-w64-gcc autoconf bison flex perl \
         gnutls dav1d bzip2 libxkbcommon vulkan-headers vulkan-icd-loader \
-        freetype2 fontconfig libunwind patch \
+        freetype2 fontconfig libunwind patch ffmpeg \
     && pacman -Scc --noconfirm
 
 COPY build.sh /usr/local/bin/aasl-build-patches

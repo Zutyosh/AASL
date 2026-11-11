@@ -104,6 +104,17 @@ fn sha256_file(p: &Path) -> String {
 /// Apply a plan and record it. Each original is kept once as
 /// `<file>.orig`, so stock Proton can always be restored.
 pub fn apply_recorded(plan: &Plan, proton_dir: &Path, bundle_id: &str) -> Result<usize> {
+    // A previous bundle may have replaced files this one leaves stock
+    // (e.g. a DLL the Proton now ships fixed): put those back first.
+    if let Some(old) = record(proton_dir) {
+        for (rel, _) in old.files {
+            let dest = proton_dir.join(&rel);
+            let orig = PathBuf::from(format!("{}.orig", dest.display()));
+            if orig.exists() && !plan.iter().any(|(_, d)| *d == dest) {
+                std::fs::rename(&orig, &dest).ctx(|| format!("restoring {rel}"))?;
+            }
+        }
+    }
     let n = apply(plan)?;
     let files = plan
         .iter()
@@ -253,6 +264,24 @@ mod tests {
         assert_eq!(restore(&proton).unwrap(), 1);
         assert_eq!(std::fs::read_to_string(&dll).unwrap(), "stock");
         assert!(status(&proton).bundle.is_none());
+    }
+
+    #[test]
+    fn switching_bundles_restores_files_the_new_one_leaves_alone() {
+        let (_d, ex, proton) = setup();
+        let p = plan(&ex, &proton, 2).unwrap();
+        let other = proton.join("files/lib/wine/x86_64-windows/winedmo.dll");
+        std::fs::write(&other, "stock dmo").unwrap();
+        let mut first = p.clone();
+        let src = ex.join("winedmo.dll");
+        std::fs::write(&src, "old dmo").unwrap();
+        first.push((src, other.clone()));
+        apply_recorded(&first, &proton, "old").unwrap();
+        assert_eq!(std::fs::read_to_string(&other).unwrap(), "old dmo");
+        apply_recorded(&p, &proton, "new").unwrap();
+        assert_eq!(std::fs::read_to_string(&other).unwrap(), "stock dmo");
+        assert!(!PathBuf::from(format!("{}.orig", other.display())).exists());
+        assert!(status(&proton).intact);
     }
 
     #[test]

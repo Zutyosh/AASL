@@ -59,8 +59,11 @@ pub struct BuildPlan {
     pub proton: ProtonId,
     pub proton_repo: String,
     pub wine: WineSource,
+    /// Group ids from the recipe's materialised series.toml.
     pub series: Vec<String>,
+    /// The recipe, materialised (see `recipe::Plan::materialise`).
     pub patches_dir: PathBuf,
+    pub bundle_name: String,
     pub work_dir: PathBuf,
     pub out_dir: PathBuf,
     pub with_ffmpeg: bool,
@@ -108,13 +111,6 @@ pub async fn resolve_wine(
 }
 
 impl BuildPlan {
-    pub fn bundle_name(&self) -> String {
-        format!(
-            "aasl-patches-{}-{}.tar.gz",
-            self.proton.provider, self.proton.tag
-        )
-    }
-
     fn env(&self) -> Vec<(&'static str, String)> {
         vec![
             ("PROVIDER", self.proton.provider.clone()),
@@ -128,7 +124,7 @@ impl BuildPlan {
                 "WITH_FFMPEG",
                 if self.with_ffmpeg { "1" } else { "0" }.into(),
             ),
-            ("BUNDLE_NAME", self.bundle_name()),
+            ("BUNDLE_NAME", self.bundle_name.clone()),
         ]
     }
 
@@ -183,6 +179,19 @@ impl BuildPlan {
     }
 }
 
+/// File name of the bundle a recipe builds for `id` (`key` from
+/// `recipe::Plan::bundle_key`).
+pub fn bundle_name(id: &ProtonId, key: &str) -> String {
+    format!("aasl-{}-{}-{key}.tar.gz", id.provider, id.tag)
+}
+
+/// Where that bundle ends up, under AASL's cache.
+pub fn built_bundle(cache_dir: &Path, id: &ProtonId, key: &str) -> PathBuf {
+    cache_dir
+        .join("patch-builder/out")
+        .join(bundle_name(id, key))
+}
+
 /// Write the Containerfile and build script to `dir` (the build context).
 pub fn materialise_tools(dir: &Path) -> Result<()> {
     std::fs::create_dir_all(dir)
@@ -206,8 +215,9 @@ mod tests {
                 repo: "https://github.com/ValveSoftware/wine".into(),
                 commit: "abc".into(),
             },
-            series: vec!["tls".into(), "media".into()],
+            series: vec!["upstream".into(), "proton".into()],
             patches_dir: "/p".into(),
+            bundle_name: "b.tar.gz".into(),
             work_dir: "/w".into(),
             out_dir: "/o".into(),
             with_ffmpeg: true,
@@ -220,7 +230,7 @@ mod tests {
         let c = plan(Engine::Podman).command(Path::new("/t"));
         assert_eq!(c.program, PathBuf::from("podman"));
         assert!(c.args.contains(&"WINE_COMMIT=abc".to_string()));
-        assert!(c.args.contains(&"SERIES=tls media".to_string()));
+        assert!(c.args.contains(&"SERIES=upstream proton".to_string()));
         assert!(c.args.contains(&"/p:/patches:ro,Z".to_string()));
         assert_eq!(c.args.last().unwrap(), IMAGE);
     }
@@ -229,9 +239,10 @@ mod tests {
     fn host_command_uses_env() {
         let c = plan(Engine::Host).command(Path::new("/t"));
         assert_eq!(c.env["OUT_DIR"], "/o");
+        assert_eq!(c.env["BUNDLE_NAME"], "b.tar.gz");
         assert_eq!(
-            c.env["BUNDLE_NAME"],
-            "aasl-patches-ge-GE-Proton11-12.tar.gz"
+            bundle_name(&ProtonId::new("ge", "GE-Proton11-12"), "k"),
+            "aasl-ge-GE-Proton11-12-k.tar.gz"
         );
         assert!(plan(Engine::Host).image_command(Path::new("/t")).is_none());
     }
