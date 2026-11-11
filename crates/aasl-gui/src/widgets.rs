@@ -196,3 +196,77 @@ pub fn percent(done: u64, total: Option<u64>) -> Option<f32> {
         .filter(|t| *t > 0)
         .map(|t| (done as f32 * 100. / t as f32).clamp(0., 100.))
 }
+
+/// A verdict strip: a tone, a headline, one sentence and an optional action.
+pub fn banner(
+    tone: Tone,
+    head: impl Into<String>,
+    text: impl Into<String>,
+    action: Option<Element>,
+) -> Element {
+    let head_color = if tone == Tone::Neutral {
+        T.text
+    } else {
+        tone.color()
+    };
+    rect()
+        .width(Size::fill())
+        .horizontal()
+        .content(Content::Flex)
+        .cross_align(Alignment::Center)
+        .spacing(space::L)
+        .padding(space::L)
+        .corner_radius(RADIUS_CONTROL + 2.)
+        .background(alpha(tone.color(), 0.10))
+        .border(Border::new().fill(alpha(tone.color(), 0.35)).width(1.))
+        .child(
+            rect()
+                .width(Size::flex(1.))
+                .spacing(space::XS)
+                .child(
+                    label()
+                        .text(head.into())
+                        .font_size(size::LEAD)
+                        .font_weight(FontWeight::SEMI_BOLD)
+                        .color(head_color),
+                )
+                .child(body(text)),
+        )
+        .maybe_child(action)
+        .into_element()
+}
+
+/// Rows with a hairline between them.
+pub fn divided(rows: Vec<Element>) -> Vec<Element> {
+    let mut out = Vec::with_capacity(rows.len() * 2);
+    for (i, r) in rows.into_iter().enumerate() {
+        if i > 0 {
+            out.push(
+                rect()
+                    .key(format!("sep{i}"))
+                    .width(Size::fill())
+                    .height(Size::px(1.))
+                    .background(T.border)
+                    .into_element(),
+            );
+        }
+        out.push(r);
+    }
+    out
+}
+
+/// A command or a path, in a small monospace box.
+pub fn mono_box(text: impl Into<String>) -> Rect {
+    rect()
+        .width(Size::fill())
+        .padding((space::S, space::M))
+        .corner_radius(6.)
+        .background(T.bg)
+        .child(
+            label()
+                .text(text.into())
+                .font_size(size::SMALL)
+                .font_family("monospace")
+                .color(T.text),
+        )
+}

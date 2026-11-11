@@ -1,15 +1,20 @@
 //! AASL desktop app.
 
+mod agents;
 mod app;
 mod approvals;
 mod build_screen;
+mod diagnostics;
 mod i18n;
 mod launcher;
 mod loader;
 mod recipes;
+mod sessions;
 mod settings;
+mod setup;
 mod state;
 mod theme;
+mod vr;
 mod widgets;
 mod wizard;
 
@@ -32,6 +37,10 @@ pub fn restart() {
         Ok(_) => std::process::exit(0),
         Err(e) => eprintln!("aasl-gui: could not restart {}: {e}", target.display()),
     }
+}
+
+pub fn try_svc() -> Option<&'static Service> {
+    SERVICE.get()
 }
 
 pub fn svc() -> &'static Service {
@@ -102,7 +111,11 @@ mod tests {
         let paths = aasl_core::Paths::resolve(|k| (k == "HOME").then(|| h.clone())).unwrap();
         let host = aasl_system::FakeHost::new()
             .with_env("HOME", &h)
-            .with_command("python3 --version", "Python 3.13.1");
+            .with_command("python3 --version", "Python 3.13.1")
+            .with_file(
+                &format!("{h}/.config/openxr/1/active_runtime.json"),
+                r#"{"runtime":{"name":"WiVRn","library_path":"/var/lib/flatpak/app/io.github.wivrn.wivrn/current/active/files/lib/wivrn/libopenxr_wivrn.so"}}"#,
+            );
         let svc = Service::builder(paths.clone())
             .host(Arc::new(host))
             .log_file(false)
@@ -158,20 +171,69 @@ mod tests {
         }
         assert!(!launcher.render().is_empty());
 
+        // A saved session with its frame curve, for the Sessions tab.
+        let sessions = paths.state_file().parent().unwrap().join("sessions");
+        std::fs::create_dir_all(&sessions).unwrap();
+        let report = r#"{"format":1,"aasl_version":"0.1.1","recipe":{"id":"recommended","key":"750ff3f4fd938d1e","proton":"ge:GE-Proton11-12"},"hardware":{"gpu":"AMD Radeon RX 7900 XT (RADV NAVI31)","gpu_driver":"amdgpu","cpu":"AMD Ryzen 5 5600X 6-Core Processor","ram_gb":31,"distro":"CachyOS","kernel":"7.3.3-1-cachyos","vr_runtime":"WiVRn"},"started_at":1794395606,"duration_s":702,"flat":false,"exit_code":0,"crash":null,"worlds":1,"joins":2,"video":{"opened":2,"failed":0},"perf":{"frames":58017,"avg_fps":85.4,"low1_fps":14.7,"p99_frametime_ms":17.2,"stutters":213,"dips":{"episodes":3,"seconds":42.0,"fps":41.0,"gpu_load":[62.0,31.0],"gpu_clock_mhz":null,"cpu_load":null,"cause":"gpu_waiting"},"hitches":{"count":12,"longest_ms":420.0,"period_s":30.0}},"exceptions":1}"#;
+        std::fs::write(sessions.join("1794395606-recommended.json"), report).unwrap();
+        let mut csv = String::from("fps,frametime,cpu_load,gpu_load\n");
+        for i in 0..6000 {
+            let slow = (2500..2800).contains(&i) || (4800..4850).contains(&i);
+            let ft = if slow {
+                24.0
+            } else if i % 1500 == 700 {
+                220.0
+            } else {
+                11.5
+            };
+            let gpu = if slow { 30 } else { 62 };
+            csv.push_str(&format!("{:.1},{ft},35,{gpu}\n", 1000.0 / ft));
+        }
+        let tl = aasl_patches::timeline::from_mangohud(&csv).unwrap();
+        std::fs::write(
+            sessions.join("1794395606-recommended.timeline"),
+            serde_json::to_string(&tl).unwrap(),
+        )
+        .unwrap();
+
+        // A few agent calls, for the Agents page.
+        std::fs::create_dir_all(paths.logs_dir()).unwrap();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let calls = [
+            (now - 5400, "status", "{}", true),
+            (now - 5300, "run_doctor", "{}", true),
+            (now - 900, "recipe_check", r#"{"toml":"x"}"#, false),
+            (now - 600, "recipe_save", r#"{"id":"my-fix"}"#, true),
+            (now - 120, "recipe_use", r#"{"id":"my-fix"}"#, false),
+        ];
+        let audit: String = calls
+            .iter()
+            .map(|(at, tool, args, ok)| {
+                format!("{{\"args\":{args},\"at\":{at},\"ok\":{ok},\"tool\":\"{tool}\"}}\n")
+            })
+            .collect();
+        std::fs::write(paths.audit_log(), audit).unwrap();
+
         // Compatibility recipes: every tab, then the compile screen.
         state::TEST_SECTION.with(|s| s.set(Some(state::Section::Recipes)));
         for (i, name) in [
             "recipes",
-            "create",
-            "proton",
+            "mine",
             "sessions",
             "community",
+            "setup-proton",
+            "setup-fixes",
+            "setup-build",
             "build",
         ]
         .iter()
         .enumerate()
         {
-            recipes::TEST_TAB.with(|t| t.set(i as u8 % 5));
+            recipes::TEST_TAB.with(|t| t.set(i as u8 % 4));
+            setup::TEST_STEP.with(|s| s.set((4..7).contains(&i).then(|| (i - 4) as u8)));
             state::TEST_BUILD.with(|b| b.set(*name == "build"));
             let (mut r, _) = TestingRunner::new(app::app, size, |_| {}, 1.0);
             r.sync_and_update();
@@ -182,6 +244,40 @@ mod tests {
             assert!(!r.render().is_empty());
             if let Some(d) = &out {
                 r.render_to_file(d.join(format!("recipes-{name}.png")));
+            }
+        }
+        setup::TEST_STEP.with(|s| s.set(None));
+        state::TEST_BUILD.with(|b| b.set(false));
+        recipes::TEST_TAB.with(|t| t.set(2));
+        sessions::TEST_OPEN.with(|o| o.set(true));
+        let (mut r, _) = TestingRunner::new(app::app, size, |_| {}, 1.0);
+        r.sync_and_update();
+        r.poll(
+            std::time::Duration::from_millis(50),
+            std::time::Duration::from_millis(800),
+        );
+        assert!(!r.render().is_empty());
+        if let Some(d) = &out {
+            r.render_to_file(d.join("recipes-session-detail.png"));
+        }
+        sessions::TEST_OPEN.with(|o| o.set(false));
+
+        // VR and Diagnostics.
+        for (section, name, wait) in [
+            (state::Section::Vr, "vr", 800),
+            (state::Section::Diagnostics, "diagnostics", 4000),
+            (state::Section::Agents, "agents", 800),
+        ] {
+            state::TEST_SECTION.with(|s| s.set(Some(section)));
+            let (mut r, _) = TestingRunner::new(app::app, size, |_| {}, 1.0);
+            r.sync_and_update();
+            r.poll(
+                std::time::Duration::from_millis(50),
+                std::time::Duration::from_millis(wait),
+            );
+            assert!(!r.render().is_empty());
+            if let Some(d) = &out {
+                r.render_to_file(d.join(format!("{name}.png")));
             }
         }
         state::TEST_SECTION.with(|s| s.set(None));

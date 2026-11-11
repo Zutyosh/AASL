@@ -46,6 +46,8 @@ pub struct Ui {
     pub provider: State<&'static str>,
     pub update: State<Option<aasl_service::UpdateInfo>>,
     pub restart_ready: State<bool>,
+    /// Interface language; changing it remounts the screen.
+    pub lang: State<crate::i18n::Lang>,
     /// The compile screen was dismissed for the current build.
     pub build_hidden: State<bool>,
 }
@@ -151,6 +153,7 @@ pub fn use_ui() -> Ui {
         provider: use_state(|| "ge"),
         update: use_state(|| svc().update_cached()),
         restart_ready: use_state(|| false),
+        lang: use_state(crate::i18n::current),
         build_hidden: use_state(|| false),
     };
 

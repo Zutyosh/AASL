@@ -1,7 +1,8 @@
 //! UI strings in English and French, picked from LC_ALL/LANG. Every
-//! visible string goes through `t`.
+//! visible string goes through `t`, or through `tr` when it is used in a
+//! single place and reads better next to its code.
 
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU8, Ordering};
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum Lang {
@@ -10,9 +11,12 @@ pub enum Lang {
 }
 
 pub fn detect() -> Lang {
-    let v = std::env::var("LC_ALL")
-        .or_else(|_| std::env::var("LANG"))
-        .unwrap_or_default();
+    let chosen = crate::try_svc().and_then(|s| s.config().locale);
+    let v = chosen.unwrap_or_else(|| {
+        std::env::var("LC_ALL")
+            .or_else(|_| std::env::var("LANG"))
+            .unwrap_or_default()
+    });
     if v.starts_with("fr") {
         Lang::Fr
     } else {
@@ -20,14 +24,88 @@ pub fn detect() -> Lang {
     }
 }
 
+static CUR: AtomicU8 = AtomicU8::new(0);
+
+/// The language in use; resolved once, then changed only by `set`.
+pub fn current() -> Lang {
+    match CUR.load(Ordering::Relaxed) {
+        1 => Lang::En,
+        2 => Lang::Fr,
+        _ => {
+            let l = detect();
+            set(l);
+            l
+        }
+    }
+}
+
+pub fn set(l: Lang) {
+    CUR.store(if l == Lang::Fr { 2 } else { 1 }, Ordering::Relaxed);
+}
+
 pub fn t(key: &str) -> &'static str {
-    static LANG: OnceLock<Lang> = OnceLock::new();
-    let lang = *LANG.get_or_init(detect);
+    let lang = current();
     match (TABLE.iter().find(|(k, _, _)| *k == key), lang) {
         (Some((_, en, _)), Lang::En) => en,
         (Some((_, _, fr)), Lang::Fr) => fr,
         (None, _) => "?",
     }
+}
+
+/// A string used in one place: English and French side by side.
+pub fn tr(en: &'static str, fr: &'static str) -> &'static str {
+    match current() {
+        Lang::En => en,
+        Lang::Fr => fr,
+    }
+}
+
+/// "{}" slots filled in order.
+pub fn fill(template: &str, args: &[String]) -> String {
+    let mut out = template.to_string();
+    for a in args {
+        out = out.replacen("{}", a, 1);
+    }
+    out
+}
+
+/// A string that may be absent: the caller falls back to something else.
+pub fn lookup(key: &str) -> Option<&'static str> {
+    let lang = current();
+    TABLE
+        .iter()
+        .find(|(k, _, _)| *k == key)
+        .map(|(_, en, fr)| match lang {
+            Lang::En => *en,
+            Lang::Fr => *fr,
+        })
+}
+
+/// A fix's name in the user's language; unknown (custom) fixes keep theirs.
+pub fn fix_title(id: &str, fallback: &str) -> String {
+    lookup(&format!("fix.{id}.title"))
+        .unwrap_or(fallback)
+        .to_string()
+}
+
+/// What a fix does, in plain words.
+pub fn fix_summary(id: &str, fallback: &str) -> String {
+    lookup(&format!("fix.{id}.sum"))
+        .unwrap_or(fallback)
+        .to_string()
+}
+
+/// A shipped recipe's name and description, translated.
+pub fn recipe_title(id: &str, fallback: &str) -> String {
+    lookup(&format!("recipe.{id}.title"))
+        .unwrap_or(fallback)
+        .to_string()
+}
+
+pub fn recipe_desc(id: &str, fallback: &str) -> String {
+    lookup(&format!("recipe.{id}.desc"))
+        .unwrap_or(fallback)
+        .to_string()
 }
 
 /// Step label for an install step id, falling back to the id.
@@ -273,16 +351,95 @@ const TABLE: &[(&str, &str, &str)] = &[
     ),
     (
         "recipes.lead",
-        "A recipe is a Proton plus the fixes Somnium needs on it. Use the recommended one, or make your own, test it in VR and share it with its session reports.",
-        "Une recette, c'est un Proton et les correctifs dont Somnium a besoin dessus. Utilisez la recommandée, ou créez la vôtre, testez-la en VR et partagez-la avec ses rapports de session.",
+        "Somnium needs a Proton and a few fixes on top of it. The setup walks you through both.",
+        "Somnium a besoin d'un Proton et de quelques correctifs par-dessus. L'assistant vous guide pour les deux.",
     ),
-    ("recipes.tab.mine", "Recipes", "Recettes"),
-    ("recipes.tab.create", "Create", "Créer"),
+    ("recipes.tab.setup", "Setup", "Configuration"),
+    ("recipes.tab.mine", "My recipes", "Mes recettes"),
+    ("setup.current", "Current setup", "Configuration actuelle"),
     (
-        "recipes.tab.proton",
-        "Proton versions",
-        "Versions de Proton",
+        "setup.change",
+        "Change the setup",
+        "Modifier la configuration",
     ),
+    ("setup.configure", "Set up", "Configurer"),
+    ("setup.repair", "Repair", "Réparation"),
+    ("setup.mine", "My recipe", "Ma recette"),
+    ("setup.step.proton", "Proton", "Proton"),
+    ("setup.step.fixes", "Fixes", "Correctifs"),
+    ("setup.step.build", "Install", "Installation"),
+    ("setup.choose", "Choose", "Choisir"),
+    ("setup.chosen", "chosen", "choisi"),
+    ("setup.recommended", "recommended", "recommandé"),
+    ("setup.downloaded", "downloaded", "téléchargé"),
+    ("setup.picked", "Chosen:", "Choisi :"),
+    ("setup.next", "Continue", "Continuer"),
+    ("setup.back", "Back", "Retour"),
+    ("setup.on", "on", "sur"),
+    (
+        "setup.proton.title",
+        "Pick a Proton",
+        "Choisissez un Proton",
+    ),
+    (
+        "setup.proton.lead",
+        "Proton runs Somnium on Linux. The recommended build suits most setups.",
+        "Proton fait tourner Somnium sous Linux. La version recommandée convient à la plupart des configurations.",
+    ),
+    (
+        "setup.fixes.title",
+        "Pick the fixes",
+        "Choisissez les correctifs",
+    ),
+    (
+        "setup.fixes.lead",
+        "Sign-in and video need them. Start from a recipe, then tick or untick.",
+        "La connexion et les vidéos en ont besoin. Partez d'une recette, puis cochez ou décochez.",
+    ),
+    ("setup.start_from", "Start from", "Partir de"),
+    ("setup.name", "Name your recipe", "Nommez votre recette"),
+    (
+        "setup.name.sub",
+        "Your choice differs from the recipe, so it is saved as a new one.",
+        "Votre choix diffère de la recette : il est enregistré comme une nouvelle recette.",
+    ),
+    (
+        "setup.build.title",
+        "Build and install",
+        "Construire et installer",
+    ),
+    (
+        "setup.build.lead",
+        "AASL downloads the Proton, builds the fixes if needed and installs them.",
+        "AASL télécharge le Proton, construit les correctifs si besoin et les installe.",
+    ),
+    ("setup.sum", "Summary", "Récapitulatif"),
+    ("setup.sum.proton", "Proton", "Proton"),
+    ("setup.sum.recipe", "Recipe", "Recette"),
+    ("setup.sum.fixes", "Fixes", "Correctifs"),
+    ("setup.sum.patches", "Wine patches", "Correctifs Wine"),
+    ("setup.apply", "Install", "Installer"),
+    (
+        "setup.apply.build",
+        "Build and install",
+        "Construire et installer",
+    ),
+    ("setup.running", "Setting things up", "Mise en place"),
+    ("setup.running.sub", "Starting…", "Démarrage…"),
+    ("setup.done", "ready", "prêt"),
+    (
+        "setup.done.sub",
+        "Somnium now runs on this Proton with its fixes.",
+        "Somnium tourne maintenant sur ce Proton avec ses correctifs.",
+    ),
+    ("setup.finish", "Done", "Terminer"),
+    ("setup.failed", "It did not work", "Échec"),
+    (
+        "setup.failed.lead",
+        "Nothing was changed. Fix the cause below, then try again.",
+        "Rien n'a été modifié. Corrigez la cause ci-dessous, puis réessayez.",
+    ),
+    ("setup.retry", "Try again", "Réessayer"),
     ("recipes.tab.sessions", "Sessions", "Sessions"),
     ("recipes.tab.community", "Community", "Communauté"),
     ("recipes.copy", "copy", "copie"),
@@ -295,9 +452,233 @@ const TABLE: &[(&str, &str, &str)] = &[
     ("recipes.standing.proposed", "proposed", "proposée"),
     ("recipes.standing.untested", "untested", "non testée"),
     ("recipes.sessions", "sessions", "sessions"),
+    ("ses.sum.count", "Sessions", "Parties"),
+    ("ses.sum.time", "Play time", "Temps de jeu"),
+    ("ses.sum.fps", "Average frame rate", "Fluidité moyenne"),
+    ("ses.sum.crash", "Crashes in game", "Plantages en jeu"),
+    ("ses.back", "Sessions", "Sessions"),
+    ("ses.world.one", "1 world", "1 monde"),
+    (
+        "ses.avg_line",
+        "{} fps on average, {} fps at its worst",
+        "{} fps en moyenne, {} fps dans les pires moments",
+    ),
+    (
+        "ses.no_perf",
+        "No frame data: MangoHud was not recording",
+        "Pas de mesure de fluidité : MangoHud n'enregistrait pas",
+    ),
+    ("ses.t.duration", "Duration", "Durée"),
+    ("ses.t.avg", "Frame rate", "Images par seconde"),
+    ("ses.t.low", "Worst moments", "Pires moments"),
+    ("ses.t.crash", "Crash", "Plantage"),
+    ("ses.crash.none", "None", "Aucun"),
+    (
+        "ses.chart.fps",
+        "Frame rate over time",
+        "Fluidité au fil du temps",
+    ),
+    (
+        "ses.chart.fps.sub",
+        "Higher is smoother. Move the pointer over the curve for the exact values.",
+        "Plus c'est haut, plus c'est fluide. Passez la souris sur la courbe pour les valeurs exactes.",
+    ),
+    (
+        "ses.chart.load",
+        "GPU and processor load",
+        "Charge du GPU et du processeur",
+    ),
+    (
+        "ses.chart.load.sub",
+        "A GPU near 100 % is asked too much. A low GPU while the game slows down points at the processor or at loading.",
+        "Un GPU proche de 100 % en demande trop. Un GPU bas pendant un ralentissement pointe le processeur ou un chargement.",
+    ),
+    ("ses.lg.avg", "Average", "Moyenne"),
+    ("ses.lg.min", "Slowest frame", "Image la plus lente"),
+    ("ses.lg.freeze", "Freeze", "Gel"),
+    ("ses.lg.gpu", "GPU", "GPU"),
+    ("ses.lg.cpu", "Processor", "Processeur"),
+    (
+        "ses.read.fps",
+        "At {}: {} fps on average, {} fps at the slowest",
+        "À {} : {} fps en moyenne, {} fps au plus bas",
+    ),
+    (
+        "ses.read.load",
+        "At {}: GPU {} %, processor {} %",
+        "À {} : GPU {} %, processeur {} %",
+    ),
+    (
+        "ses.no_chart",
+        "No curve for this session",
+        "Pas de courbe pour cette session",
+    ),
+    (
+        "ses.no_chart.sub",
+        "It was recorded before AASL kept the detail, or MangoHud was not there.",
+        "Elle date d'avant que AASL garde le détail, ou MangoHud n'était pas là.",
+    ),
+    (
+        "ses.slow",
+        "What slowed the game down",
+        "Ce qui a ralenti le jeu",
+    ),
+    ("ses.dips", "Slowdowns", "Ralentissements"),
+    (
+        "ses.dips.sub",
+        "{} episodes, {} s in total, around {} fps",
+        "{} épisodes, {} s au total, vers {} fps",
+    ),
+    ("ses.cause", "Likely cause", "Cause probable"),
+    (
+        "ses.cause.gpu_bound",
+        "The GPU is saturated: the game draws more than it can handle (resolution, avatars, world).",
+        "Le GPU est saturé : le jeu dessine plus qu'il ne peut (résolution, avatars, monde).",
+    ),
+    (
+        "ses.cause.gpu_clock",
+        "The GPU clock drops during slowdowns: power management.",
+        "La fréquence du GPU chute pendant les ralentissements : gestion d'énergie.",
+    ),
+    (
+        "ses.cause.gpu_waiting",
+        "The GPU waits: the bottleneck is the processor, the VR compositor or loading.",
+        "Le GPU attend : le goulot est le processeur, le compositeur VR ou un chargement.",
+    ),
+    (
+        "ses.cause.unknown",
+        "The cause could not be told from the log.",
+        "La cause n'a pas pu être déterminée avec le journal.",
+    ),
+    (
+        "ses.dips.gpu",
+        "GPU load: {} % normally, {} % during slowdowns",
+        "Charge GPU : {} % en temps normal, {} % pendant les ralentissements",
+    ),
+    ("ses.hitch", "Freezes", "Gels"),
+    (
+        "ses.hitch.sub",
+        "{} frames of {} ms or more, the longest {} ms",
+        "{} images de {} ms ou plus, la plus longue {} ms",
+    ),
+    (
+        "ses.hitch.period",
+        "They come back every {} s: something in the game runs on a timer, it is not a load problem.",
+        "Ils reviennent toutes les {} s : une tâche du jeu tourne sur minuterie, ce n'est pas un problème de charge.",
+    ),
+    ("ses.stutter", "Slow frames", "Images lentes"),
+    (
+        "ses.stutter.sub",
+        "{} frames took more than twice the usual time.",
+        "{} images ont pris plus de deux fois le temps habituel.",
+    ),
+    ("ses.p99", "Time per frame", "Temps par image"),
+    (
+        "ses.p99.sub",
+        "99 % of frames took under {} ms.",
+        "99 % des images ont pris moins de {} ms.",
+    ),
+    ("ses.g.title", "In the game", "Dans le jeu"),
+    ("ses.g.worlds", "Worlds entered", "Mondes visités"),
+    ("ses.g.joins", "Sessions joined", "Salons rejoints"),
+    ("ses.g.videos", "Videos played", "Vidéos lues"),
+    (
+        "ses.g.videos.sub",
+        "Opened without error, out of all opened.",
+        "Ouvertes sans erreur, sur le total ouvert.",
+    ),
+    (
+        "ses.g.errors",
+        "Errors logged by the game",
+        "Erreurs notées par le jeu",
+    ),
+    (
+        "ses.g.errors.sub",
+        "Somnium logs a few on every platform.",
+        "Somnium en note quelques-unes sur toutes les plateformes.",
+    ),
+    ("ses.hw", "This machine", "Cette machine"),
+    ("ses.hw.gpu", "Graphics card", "Carte graphique"),
+    ("ses.hw.driver", "Driver", "Pilote"),
+    ("ses.hw.cpu", "Processor", "Processeur"),
+    ("ses.hw.ram", "Memory", "Mémoire"),
+    ("ses.hw.ram.v", "{} GB", "{} Go"),
+    ("ses.hw.os", "System", "Système"),
+    ("ses.hw.kernel", "Kernel", "Noyau"),
+    ("ses.hw.vr", "VR runtime", "Runtime VR"),
+    (
+        "ses.delete",
+        "Delete this session",
+        "Supprimer cette session",
+    ),
+    (
+        "ses.delete.confirm",
+        "Delete for good",
+        "Supprimer définitivement",
+    ),
+    (
+        "ses.delete.sub",
+        "Its report and curve are erased. Recipes lose this evidence.",
+        "Son rapport et sa courbe sont effacés. Les recettes perdent cette preuve.",
+    ),
+    ("recipes.stat.one", "1 session", "1 partie"),
+    ("recipes.stat.many", "sessions", "parties"),
+    ("recipes.stat.nocrash", "no crash", "aucun crash"),
+    ("recipes.stat.crash.one", "1 crash", "1 crash"),
+    ("recipes.stat.crash.many", "crashes", "crashs"),
+    ("recipes.stat.videos", "videos played", "vidéos lues"),
+    ("recipes.stat.fixes.one", "1 fix", "1 correctif"),
+    ("recipes.stat.fixes.many", "fixes", "correctifs"),
+    ("recipes.stat.pinned", "Proton", "Proton"),
+    ("recipes.stat.tested", "tested on", "testée sur"),
     ("recipes.crashes", "crashes", "crashs"),
     ("recipes.videos", "videos", "vidéos"),
-    ("recipes.pacing", "pacing", "régularité"),
+    (
+        "fix.tls-client-certs.title",
+        "Account sign-in",
+        "Connexion au compte",
+    ),
+    (
+        "fix.tls-client-certs.sum",
+        "Without it, signing in to Somnium never completes.",
+        "Sans lui, la connexion à Somnium n'aboutit jamais.",
+    ),
+    (
+        "fix.media-by-url.title",
+        "Videos from links",
+        "Vidéos par lien",
+    ),
+    (
+        "fix.media-by-url.sum",
+        "Plays the live and web video streams that worlds use.",
+        "Lit les flux vidéo (direct, web) utilisés dans les mondes.",
+    ),
+    (
+        "fix.ytdlp-hook.title",
+        "YouTube downloader",
+        "Téléchargeur YouTube",
+    ),
+    (
+        "fix.ytdlp-hook.sum",
+        "Lets Somnium fetch YouTube videos through yt-dlp.",
+        "Permet à Somnium de récupérer les vidéos YouTube avec yt-dlp.",
+    ),
+    (
+        "fix.ytdlp-android-client.title",
+        "YouTube with sound",
+        "YouTube avec le son",
+    ),
+    (
+        "fix.ytdlp-android-client.sum",
+        "Picks a 360p stream that carries picture and sound together. Needs the YouTube downloader.",
+        "Choisit un flux 360p qui contient l'image et le son. Demande le téléchargeur YouTube.",
+    ),
+    ("recipe.recommended.title", "Recommended", "Recommandée"),
+    (
+        "recipe.recommended.desc",
+        "Sign-in, videos and YouTube with sound on the Proton you pick.",
+        "Connexion, vidéos et YouTube avec le son sur le Proton choisi.",
+    ),
     ("recipes.worlds", "worlds", "mondes"),
     (
         "recipes.build",
@@ -319,7 +700,25 @@ const TABLE: &[(&str, &str, &str)] = &[
     ("recipes.in_use", "In use", "Utilisée"),
     ("recipes.active", "in use", "utilisée"),
     ("recipes.builtin", "built-in", "intégrée"),
-    ("recipes.yours", "yours", "perso"),
+    ("recipes.yours", "Your recipes", "Vos recettes"),
+    (
+        "recipes.official",
+        "Official recipes",
+        "Recettes officielles",
+    ),
+    ("recipes.fork", "Fork", "Forker"),
+    ("recipes.fork.suffix", "fork", "fork"),
+    ("recipes.edit", "Edit", "Modifier"),
+    (
+        "recipes.yours.none",
+        "No recipe of your own yet",
+        "Pas encore de recette perso",
+    ),
+    (
+        "recipes.yours.none.sub",
+        "Fork an official one to start from it, or import a shared recipe.",
+        "Forkez une recette officielle pour partir de celle-ci, ou importez une recette partagée.",
+    ),
     (
         "recipes.proton.picked",
         "Proton picked in AASL",
@@ -332,7 +731,7 @@ const TABLE: &[(&str, &str, &str)] = &[
         "This recipe brings Wine patches that are not in AASL's library. They run inside Somnium: only use recipes from people you trust.",
         "Cette recette apporte des correctifs Wine absents de la bibliothèque d'AASL. Ils tournent dans Somnium : n'utilisez que des recettes de personnes de confiance.",
     ),
-    ("recipes.duplicate", "Duplicate", "Dupliquer"),
+    ("recipes.duplicate", "Modify", "Modifier"),
     ("recipes.export", "Copy", "Copier"),
     ("recipes.share", "Share", "Partager"),
     (
@@ -400,7 +799,7 @@ const TABLE: &[(&str, &str, &str)] = &[
         "Applied in this order",
         "Appliqués dans cet ordre",
     ),
-    ("recipes.kind.patch", "Wine patches", "Correctifs Wine"),
+    ("recipes.kind.patch", "compiled", "à compiler"),
     ("recipes.kind.env", "setting", "réglage"),
     (
         "recipes.check.build",
@@ -426,11 +825,7 @@ const TABLE: &[(&str, &str, &str)] = &[
         "crash à la fermeture",
     ),
     ("recipes.desktop", "desktop", "bureau"),
-    (
-        "recipes.sessions.title",
-        "Session reports",
-        "Rapports de session",
-    ),
+    ("recipes.sessions.title", "Recording", "Enregistrement"),
     (
         "recipes.sessions.record",
         "Record sessions",
@@ -527,6 +922,8 @@ const TABLE: &[(&str, &str, &str)] = &[
     ("prefs.diagnostics", "Diagnostics", "Diagnostic"),
     ("prefs.logs", "Logs", "Journaux"),
     ("prefs.agents", "Agents", "Agents"),
+    ("prefs.lang", "Language", "Langue"),
+    ("prefs.lang.auto", "Auto", "Auto"),
     ("prefs.wait", "Wait for the headset", "Attendre le casque"),
     (
         "prefs.wait.sub",
