@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use aasl_core::{Event, Severity};
 use aasl_diag::Finding;
-use aasl_service::{InstalledView, ReleaseView, Status};
+use aasl_service::{Account, InstalledView, OnlineStats, ReleaseView, Status, UpcomingEvent};
 use freya::prelude::*;
 
 use crate::{approvals, svc};
@@ -26,6 +26,9 @@ pub enum Section {
     Logs,
     Agents,
 }
+
+/// Upcoming events with their downloaded banner.
+pub type EventList = Vec<(UpcomingEvent, Option<std::path::PathBuf>)>;
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct Ui {
@@ -50,6 +53,12 @@ pub struct Ui {
     pub lang: State<crate::i18n::Lang>,
     /// The compile screen was dismissed for the current build.
     pub build_hidden: State<bool>,
+    /// Players online in Somnium Space (public, refreshed every minute).
+    pub online: State<Option<OnlineStats>>,
+    /// The signed-in Somnium account, if any.
+    pub account: State<Option<Account>>,
+    /// Upcoming events with their downloaded banner, soonest first.
+    pub events: State<EventList>,
 }
 
 impl Ui {
@@ -86,6 +95,34 @@ impl Ui {
         });
     }
 
+    /// Fetch upcoming events and their banners; quiet when signed out.
+    pub fn refresh_events(mut self) {
+        if self.account.peek().is_none() {
+            self.events.set(Vec::new());
+            return;
+        }
+        spawn_in_window(async move {
+            let r = tokio::spawn(async {
+                let evs = svc().upcoming_events().await?;
+                let mut out = Vec::new();
+                for ev in evs.into_iter().take(6) {
+                    let img = svc().event_image(&ev).await.ok();
+                    out.push((ev, img));
+                }
+                aasl_core::Result::Ok(out)
+            })
+            .await;
+            match r {
+                Ok(Ok(v)) => self.events.set(v),
+                Ok(Err(aasl_core::Error::Invalid(msg))) => {
+                    self.account.set(svc().somnium_account());
+                    self.notice(Severity::Warn, msg);
+                }
+                _ => {}
+            }
+        });
+    }
+
     pub fn load_releases(mut self, refresh: bool) {
         let provider = *self.provider.read();
         self.run(
@@ -104,6 +141,17 @@ thread_local! {
     /// Snapshot test: open Settings on this section, and show the compile screen.
     pub static TEST_SECTION: std::cell::Cell<Option<Section>> = const { std::cell::Cell::new(None) };
     pub static TEST_BUILD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Snapshot test: a signed-in account with these events (no network).
+    pub static TEST_EVENTS: std::cell::RefCell<Option<(Account, EventList)>> = const { std::cell::RefCell::new(None) };
+}
+
+fn test_events() -> Option<(Account, EventList)> {
+    #[cfg(test)]
+    {
+        return TEST_EVENTS.with(|e| e.borrow().clone());
+    }
+    #[allow(unreachable_code)]
+    None
 }
 
 fn test_section() -> Option<Section> {
@@ -127,6 +175,9 @@ pub fn building(ui: Ui) -> bool {
 pub fn use_ui() -> Ui {
     let first = !svc().status().installed;
     let test = test_section();
+    let seeded = test_events();
+    let seeded_events = seeded.as_ref().map(|s| s.1.clone());
+    let is_seeded = seeded.is_some();
     let mut ui = Ui {
         background: use_state(|| svc().background()),
         screen: use_state(move || {
@@ -155,7 +206,29 @@ pub fn use_ui() -> Ui {
         restart_ready: use_state(|| false),
         lang: use_state(crate::i18n::current),
         build_hidden: use_state(|| false),
+        online: use_state(|| None),
+        account: use_state(move || seeded.map(|s| s.0).or_else(|| svc().somnium_account())),
+        events: use_state(move || seeded_events.unwrap_or_default()),
     };
+
+    use_future(move || async move {
+        loop {
+            if let Ok(Ok(o)) = tokio::spawn(async { svc().online_stats().await }).await {
+                ui.online.set(Some(o));
+            }
+            tokio::time::sleep(Duration::from_secs(60)).await;
+        }
+    });
+
+    use_future(move || async move {
+        if is_seeded {
+            return;
+        }
+        loop {
+            ui.refresh_events();
+            tokio::time::sleep(Duration::from_secs(300)).await;
+        }
+    });
 
     use_future(move || async move {
         let mut rx = svc().subscribe();

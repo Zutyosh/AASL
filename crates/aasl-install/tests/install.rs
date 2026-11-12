@@ -128,6 +128,7 @@ fn installer(home: &Path, uri: &str, umu_sha: String) -> Installer {
             umu_sha256: umu_sha,
             github_api: format!("{uri}/api"),
             somnium_installer_url: format!("{uri}/somnium.exe"),
+            somnium_api: format!("{uri}/somnium"),
         },
         host: Arc::new(host),
         exec: Arc::new(FakeUmu),

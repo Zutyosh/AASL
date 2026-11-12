@@ -19,6 +19,7 @@ use crate::{app, svc};
 enum Page {
     Welcome,
     Proton,
+    Account,
     Source,
     Installing,
     Done,
@@ -81,6 +82,7 @@ impl Component for WizardScreen {
         let content: Element = match *page.read() {
             Page::Welcome => welcome(w).into_element(),
             Page::Proton => proton(w).into_element(),
+            Page::Account => account(w).into_element(),
             Page::Source => source(w, *hover.read()).into_element(),
             Page::Installing => installing(w, *phrase.read()).into_element(),
             Page::Done => done(w).into_element(),
@@ -153,9 +155,10 @@ fn first_page() -> Page {
     {
         return match TEST_PAGE.with(|p| p.get()) {
             1 => Page::Proton,
-            2 => Page::Source,
-            3 => Page::Installing,
-            4 => Page::Done,
+            2 => Page::Account,
+            3 => Page::Source,
+            4 => Page::Installing,
+            5 => Page::Done,
             _ => Page::Welcome,
         };
     }
@@ -191,6 +194,7 @@ fn dots(current: Page) -> impl IntoElement {
     let pages = [
         Page::Welcome,
         Page::Proton,
+        Page::Account,
         Page::Source,
         Page::Installing,
         Page::Done,
@@ -362,7 +366,7 @@ fn proton(mut w: Wiz) -> impl IntoElement {
                 .on_press(move |_| w.page.set(Page::Welcome))
                 .into_element(),
             primary(t("wiz.next"))
-                .on_press(move |_| w.page.set(Page::Source))
+                .on_press(move |_| w.page.set(Page::Account))
                 .into_element(),
         ]))
 }
@@ -502,8 +506,44 @@ fn source(mut w: Wiz, hover: bool) -> impl IntoElement {
         .maybe_child(error.map(|e| centered(body(e).color(T.error))))
         .child(actions(vec![
             link(t("wiz.back"))
+                .on_press(move |_| w.page.set(Page::Account))
+                .into_element(),
+        ]))
+}
+
+/// Optional: sign in to Somnium Space for the events on the main screen.
+fn account(mut w: Wiz) -> impl IntoElement {
+    let signed_in = w.ui.account.read().is_some();
+    let next: Element = if signed_in {
+        primary(t("wiz.next"))
+            .on_press(move |_| w.page.set(Page::Source))
+            .into_element()
+    } else {
+        Button::new()
+            .corner_radius(RADIUS_PILL)
+            .padding((12., 28.))
+            .on_press(move |_| w.page.set(Page::Source))
+            .child(crate::i18n::tr("Skip", "Passer"))
+            .into_element()
+    };
+    rect()
+        .width(Size::fill())
+        .cross_align(Alignment::Center)
+        .spacing(space::L)
+        .child(centered(title(crate::i18n::tr(
+            "Your Somnium Space account",
+            "Votre compte Somnium Space",
+        ))))
+        .child(centered(lead(crate::i18n::tr(
+            "Sign in to see upcoming events on the main screen. You can do it later in Settings.",
+            "Connectez-vous pour voir les prochains événements sur l'écran principal. Vous pourrez le faire plus tard dans les Réglages.",
+        ))))
+        .child(crate::events::AccountForm(w.ui))
+        .child(actions(vec![
+            link(t("wiz.back"))
                 .on_press(move |_| w.page.set(Page::Proton))
                 .into_element(),
+            next,
         ]))
 }
 

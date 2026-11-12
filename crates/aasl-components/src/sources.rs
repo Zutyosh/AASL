@@ -16,6 +16,8 @@ pub const SOMNIUM_INSTALLER_URL: &str =
 /// launcher background (never shipped in AASL).
 pub const BACKGROUND_URL: &str =
     "https://ai-space.fra1.cdn.digitaloceanspaces.com/website/somniumPoster.jpeg";
+/// Somnium Space's web API (players online, events, sign-in).
+pub const SOMNIUM_API: &str = "https://identity.somniumspace.org/v3/identity/api";
 /// AASL's GitHub repository: community recipes and their submission form.
 pub const REPO: &str = "Zutyosh/AASL";
 pub const COMMUNITY_RAW: &str = "https://raw.githubusercontent.com/Zutyosh/AASL/main/community";
@@ -28,6 +30,8 @@ pub struct Sources {
     /// GitHub API root, overridable for tests and mirrors.
     pub github_api: String,
     pub somnium_installer_url: String,
+    /// Somnium Space's web API, as used by its launcher.
+    pub somnium_api: String,
 }
 
 impl Default for Sources {
@@ -39,6 +43,7 @@ impl Default for Sources {
             umu_sha256: UMU_SHA256.into(),
             github_api: "https://api.github.com".into(),
             somnium_installer_url: SOMNIUM_INSTALLER_URL.into(),
+            somnium_api: SOMNIUM_API.into(),
         }
     }
 }

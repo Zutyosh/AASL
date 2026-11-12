@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex, RwLock};
 
 mod recipes;
 mod sessions;
+mod somnium;
 mod tools;
 mod update;
 
@@ -15,6 +16,9 @@ pub use aasl_patches::Source as PatchSource;
 pub use aasl_patches::{Library, Recipe};
 pub use recipes::RecipeInfo;
 pub use sessions::{SavedReport, Share};
+pub use somnium::{
+    Account, LoginStep, OnlinePoint, OnlineStats, TwoFactor, TwoFactorMethod, UpcomingEvent,
+};
 pub use tools::{InstalledView, PatchFile, ReleaseView};
 pub use update::UpdateInfo;
 
@@ -75,6 +79,8 @@ struct Inner {
     cpu: CpuLevel,
     catalog: Mutex<Option<Catalog>>,
     update: Mutex<Option<UpdateInfo>>,
+    /// Temporary token between a Somnium sign-in and its second factor.
+    somnium_2fa: Mutex<Option<String>>,
 }
 
 #[derive(Clone)]
@@ -130,6 +136,7 @@ impl Builder {
                 cpu: CpuLevel::detect(),
                 catalog: Mutex::new(None),
                 update: Mutex::new(None),
+                somnium_2fa: Mutex::new(None),
             }),
         })
     }

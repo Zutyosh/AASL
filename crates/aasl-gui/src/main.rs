@@ -5,6 +5,7 @@ mod app;
 mod approvals;
 mod build_screen;
 mod diagnostics;
+mod events;
 mod i18n;
 mod launcher;
 mod loader;
@@ -131,9 +132,16 @@ mod tests {
             .map(std::path::PathBuf::from);
         let size = Size2D::new(1180., 720.);
 
-        for (i, name) in ["welcome", "proton", "source", "installing", "done"]
-            .iter()
-            .enumerate()
+        for (i, name) in [
+            "welcome",
+            "proton",
+            "account",
+            "source",
+            "installing",
+            "done",
+        ]
+        .iter()
+        .enumerate()
         {
             wizard::TEST_PAGE.with(|p| p.set(i as u8));
             let (mut wizard, _) = TestingRunner::new(app::app, size, |_| {}, 1.0);
@@ -147,6 +155,25 @@ mod tests {
                 wizard.render_to_file(d.join(format!("wizard-{name}.png")));
             }
         }
+        wizard::TEST_PAGE.with(|p| p.set(2));
+        events::TEST_CHALLENGE.with(|c| {
+            *c.borrow_mut() = Some(aasl_service::TwoFactor {
+                sms: true,
+                authenticator: true,
+                phone: Some("+33 *** ** 12".into()),
+            })
+        });
+        let (mut code, _) = TestingRunner::new(app::app, size, |_| {}, 1.0);
+        code.sync_and_update();
+        code.poll(
+            std::time::Duration::from_millis(50),
+            std::time::Duration::from_millis(800),
+        );
+        assert!(!code.render().is_empty());
+        if let Some(d) = &out {
+            code.render_to_file(d.join("wizard-account-code.png"));
+        }
+        events::TEST_CHALLENGE.with(|c| *c.borrow_mut() = None);
         wizard::TEST_PAGE.with(|p| p.set(0));
 
         let launcher_exe = paths
@@ -170,6 +197,56 @@ mod tests {
             launcher.render_to_file(d.join("launcher.png"));
         }
         assert!(!launcher.render().is_empty());
+
+        // Signed in, with events coming up.
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let ev = |id: &str, name: &str, start: u64| aasl_service::UpcomingEvent {
+            id: id.into(),
+            name: name.into(),
+            description: Some(
+                "Live music, open mic after the show. Doors open thirty minutes before.".into(),
+            ),
+            location: Some("Amphitheater".into()),
+            creator: Some("Shadola".into()),
+            attendees: Some(12),
+            start,
+            end: Some(start + 9000),
+            image_url: None,
+        };
+        let banner = std::env::var("AASL_SNAPSHOT_BG")
+            .ok()
+            .map(std::path::PathBuf::from);
+        state::TEST_EVENTS.with(|e| {
+            *e.borrow_mut() = Some((
+                aasl_service::Account {
+                    name: "Zutyo.sh".into(),
+                    user_id: None,
+                    expires: None,
+                },
+                vec![
+                    (
+                        ev("1", "Velvet & Dragon Concert", now + 5 * 3600 + 33 * 60),
+                        banner,
+                    ),
+                    (ev("2", "World Exploring", now + 26 * 3600), None),
+                    (ev("3", "Tarot Reading", now + 50 * 3600), None),
+                ],
+            ))
+        });
+        let (mut signed, _) = TestingRunner::new(app::app, size, |_| {}, 1.0);
+        signed.sync_and_update();
+        signed.poll(
+            std::time::Duration::from_millis(50),
+            std::time::Duration::from_millis(1500),
+        );
+        if let Some(d) = &out {
+            signed.render_to_file(d.join("launcher-events.png"));
+        }
+        assert!(!signed.render().is_empty());
+        state::TEST_EVENTS.with(|e| *e.borrow_mut() = None);
 
         // A saved session with its frame curve, for the Sessions tab.
         let sessions = paths.state_file().parent().unwrap().join("sessions");

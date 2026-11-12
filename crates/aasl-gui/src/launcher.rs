@@ -49,6 +49,7 @@ fn view(ui: Ui) -> impl IntoElement {
                         .horizontal()
                         .spacing(space::S)
                         .cross_align(Alignment::Center)
+                        .maybe_child(crate::events::online_badge(ui))
                         .maybe_child(
                             (!ui.approvals.read().is_empty())
                                 .then(|| chip(t("agents.pending"), Tone::Accent)),
@@ -56,7 +57,15 @@ fn view(ui: Ui) -> impl IntoElement {
                         .maybe_child(update_badge(ui)),
                 ),
         )
-        .child(rect().width(Size::fill()).height(Size::flex(1.)))
+        .child(
+            rect()
+                .width(Size::fill())
+                .height(Size::flex(1.))
+                .horizontal()
+                .main_align(Alignment::End)
+                .padding((space::XL, 0., space::L, 0.))
+                .child(crate::events::events_panel(ui)),
+        )
         .child(notices(ui))
         .child(
             rect()

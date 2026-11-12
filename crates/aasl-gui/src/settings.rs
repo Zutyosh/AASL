@@ -216,6 +216,10 @@ fn general(mut ui: Ui) -> impl IntoElement {
         .spacing(space::XL)
         .child(title(t("prefs.general")))
         .child(group(
+            crate::i18n::tr("Somnium Space account", "Compte Somnium Space"),
+            vec![crate::events::AccountForm(ui).into_element()],
+        ))
+        .child(group(
             t("prefs.updates"),
             vec![
                 row(
