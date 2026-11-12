@@ -8,10 +8,10 @@
 
 use std::path::{Path, PathBuf};
 
+use serde::{Deserialize, Serialize};
 use unilux_components::{Downloader, ProtonId, proton};
 use unilux_core::exec::CommandSpec;
 use unilux_core::{Error, Result};
-use serde::{Deserialize, Serialize};
 
 use crate::ARCHIVE_FORMAT;
 

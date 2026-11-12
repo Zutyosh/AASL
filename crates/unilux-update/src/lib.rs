@@ -2,9 +2,9 @@
 
 use std::path::{Path, PathBuf};
 
+use serde::{Deserialize, Serialize};
 use unilux_components::Checksum;
 use unilux_core::{Error, IoContext, Result};
-use serde::{Deserialize, Serialize};
 
 pub const REPO: &str = "Zutyosh/Unilux";
 pub const APPIMAGE_ASSET: &str = "Unilux-x86_64.AppImage";

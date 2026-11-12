@@ -2,10 +2,10 @@
 
 use std::sync::OnceLock;
 
+use freya::prelude::*;
 use unilux_patches::community::{Crash, DipCause, HITCH_MS};
 use unilux_patches::timeline::Timeline;
 use unilux_service::SavedReport;
-use freya::prelude::*;
 
 use crate::i18n::{Lang, current, fill, recipe_title, t};
 use crate::state::Ui;

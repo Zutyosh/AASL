@@ -2,8 +2,8 @@
 
 use std::time::Duration;
 
-use unilux_agent::ToolInfo;
 use freya::prelude::*;
+use unilux_agent::ToolInfo;
 
 use crate::i18n::{fill, tr};
 use crate::state::Ui;

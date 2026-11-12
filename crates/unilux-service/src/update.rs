@@ -1,8 +1,8 @@
 //! Unilux's own updates, from GitHub releases.
 
+use serde::Serialize;
 use unilux_core::{Error, Event, Result, Severity};
 use unilux_update::{Applied, Channel, InstallKind, Release, Updater, Version};
-use serde::Serialize;
 
 use crate::Service;
 

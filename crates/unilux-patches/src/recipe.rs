@@ -9,10 +9,10 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use unilux_components::ProtonId;
-use unilux_core::{Error, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use unilux_components::ProtonId;
+use unilux_core::{Error, Result};
 
 include!(concat!(env!("OUT_DIR"), "/embedded.rs"));
 

@@ -2,8 +2,8 @@
 
 use std::time::Duration;
 
-use unilux_system::{OpenVrLayer, RuntimeKind, VrStatus, VrTuning};
 use freya::prelude::*;
+use unilux_system::{OpenVrLayer, RuntimeKind, VrStatus, VrTuning};
 
 use crate::i18n::{fill, tr};
 use crate::state::{Section, Ui};

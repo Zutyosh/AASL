@@ -5,12 +5,12 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use nix::sys::signal::{Signal, kill};
+use nix::unistd::Pid;
 use unilux_components::sources::LAUNCHER_REL_PATH;
 use unilux_core::exec::{CommandSpec, spawn};
 use unilux_core::{Config, Error, Event, Events, Paths, Result, Severity};
 use unilux_system::{Host, procs};
-use nix::sys::signal::{Signal, kill};
-use nix::unistd::Pid;
 
 use crate::env::{LaunchEnv, build_env};
 

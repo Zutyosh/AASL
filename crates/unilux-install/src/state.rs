@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use serde::{Deserialize, Serialize};
 use unilux_components::ProtonId;
 use unilux_core::{Error, Result, write_atomic};
-use serde::{Deserialize, Serialize};
 
 /// What the last install or repair did. Reporting only: every step checks
 /// the real filesystem before deciding to skip.

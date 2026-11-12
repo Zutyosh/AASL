@@ -1,8 +1,8 @@
 //! The catalog: recommended Proton and published patch bundles.
 
+use serde::{Deserialize, Serialize};
 use unilux_components::ProtonId;
 use unilux_core::{Error, Result};
-use serde::{Deserialize, Serialize};
 
 pub const EMBEDDED: &str = include_str!("../../../data/catalog.toml");
 pub const DEFAULT_URL: &str =

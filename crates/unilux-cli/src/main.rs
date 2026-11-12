@@ -10,10 +10,10 @@ use commands::{CommunityCmd, PatchCmd, ProtonCmd, RecipeCmd, SessionCmd, parse_i
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+use clap::{Parser, Subcommand};
 use unilux_core::{Event, LogSource};
 use unilux_diag::FixId;
 use unilux_service::{InstallOptions, LaunchOpts, Service};
-use clap::{Parser, Subcommand};
 
 use output::Out;
 

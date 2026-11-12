@@ -3,9 +3,9 @@
 
 use std::path::PathBuf;
 
+use freya::prelude::*;
 use unilux_core::Severity;
 use unilux_service::InstallOptions;
-use freya::prelude::*;
 
 use crate::i18n::{step, t};
 use crate::state::{Screen, Ui};

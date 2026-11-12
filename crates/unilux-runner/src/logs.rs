@@ -4,9 +4,9 @@ use std::collections::VecDeque;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use unilux_core::{Event, Events, LogSource};
 use serde::Serialize;
 use tokio::io::AsyncWriteExt;
+use unilux_core::{Event, Events, LogSource};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct LogLine {

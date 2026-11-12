@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use serde::Serialize;
 use unilux_components::extract::extract_to_staging;
 use unilux_components::sources::LAUNCHER_REL_PATH;
 use unilux_components::{Checksum, CpuLevel, Downloader, ProtonId, Sources};
@@ -14,7 +15,6 @@ use unilux_core::{Config, Error, Event, Events, IoContext, Paths, Result, Severi
 use unilux_patches::catalog::{Catalog, TargetStatus};
 use unilux_patches::{ARCHIVE_FORMAT, bundle};
 use unilux_system::Host;
-use serde::Serialize;
 
 use crate::state::{InstallState, now};
 use crate::{desktop, proton_dir, proton_manager, umu_command, umu_run};
@@ -375,7 +375,11 @@ impl Run<'_> {
         let published = cat.resolve(&id).into_iter().next();
         let recipe = self.opts.recipe.as_ref();
         let built = recipe.map(|p| {
-            unilux_patches::builder::built_bundle(&self.inst.paths.cache_dir, &id, &p.bundle_key(&id))
+            unilux_patches::builder::built_bundle(
+                &self.inst.paths.cache_dir,
+                &id,
+                &p.bundle_key(&id),
+            )
         });
         let source = unilux_patches::choose(
             recipe.is_none_or(|p| p.needs_build()),

@@ -3,10 +3,10 @@
 
 use std::path::{Path, PathBuf};
 
+use serde::{Deserialize, Serialize};
 use unilux_components::sources::{COMMUNITY_RAW, REPO};
 use unilux_core::{Error, Result, Severity};
 use unilux_patches::community::{self, Hardware, REPORT_FORMAT, RecipeRef, SessionReport};
-use serde::{Deserialize, Serialize};
 
 use crate::Service;
 

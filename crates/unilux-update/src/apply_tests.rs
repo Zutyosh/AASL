@@ -181,7 +181,10 @@ async fn portable_binaries_are_replaced_from_the_tarball() {
         .await
         .unwrap();
     assert_eq!(std::fs::read(d.path().join("unilux")).unwrap(), b"cli v9");
-    assert_eq!(std::fs::read(d.path().join("unilux-gui")).unwrap(), b"gui v9");
+    assert_eq!(
+        std::fs::read(d.path().join("unilux-gui")).unwrap(),
+        b"gui v9"
+    );
     assert_eq!(out.replaced.len(), 2);
 }
 

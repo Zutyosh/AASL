@@ -3,11 +3,11 @@
 
 use std::path::PathBuf;
 
+use serde::Serialize;
 use unilux_components::ProtonId;
 use unilux_core::{Error, Result, Severity};
 use unilux_patches::recipe::DEFAULT_RECIPE;
 use unilux_patches::{Library, Plan, Recipe, Source};
-use serde::Serialize;
 
 use crate::Service;
 
@@ -104,7 +104,9 @@ impl Service {
             .into_iter()
             .chain(self.user_recipes())
             .find(|r| r.id == id)
-            .ok_or_else(|| Error::Invalid(format!("no recipe named {id}; see `unilux recipe list`")))
+            .ok_or_else(|| {
+                Error::Invalid(format!("no recipe named {id}; see `unilux recipe list`"))
+            })
     }
 
     fn active_recipe_id(&self) -> String {

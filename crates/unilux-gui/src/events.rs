@@ -1,9 +1,9 @@
 //! Somnium Space's live side on the main screen: players online, the next
 //! events, and the optional sign-in that unlocks them.
 
-use unilux_service::{Account, LoginStep, TwoFactor, TwoFactorMethod, UpcomingEvent};
 use chrono::{Datelike, Local, TimeZone, Timelike};
 use freya::prelude::*;
+use unilux_service::{Account, LoginStep, TwoFactor, TwoFactorMethod, UpcomingEvent};
 
 use crate::i18n::{Lang, current, fill, tr};
 use crate::state::{Screen, Section, Ui};

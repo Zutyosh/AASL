@@ -6,9 +6,9 @@
 use std::collections::BTreeSet;
 use std::path::Path;
 
+use serde::{Deserialize, Serialize};
 use unilux_components::ProtonId;
 use unilux_core::{Error, Result};
-use serde::{Deserialize, Serialize};
 
 use crate::recipe::{Library, Recipe};
 

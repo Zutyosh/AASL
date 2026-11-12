@@ -1,10 +1,10 @@
 //! Compatibility recipes: the setup tunnel for the Proton and its fixes,
 //! the recipes you keep, the evidence from play sessions and the community.
 
+use freya::prelude::*;
 use unilux_core::Severity;
 use unilux_patches::community::{Status as Standing, Verdict};
 use unilux_service::{PatchSource, RecipeInfo, Share};
-use freya::prelude::*;
 
 use crate::i18n::t;
 use crate::setup::{Flow, Intent, SetupFlow, Step};

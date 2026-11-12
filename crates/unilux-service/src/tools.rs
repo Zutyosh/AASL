@@ -2,6 +2,7 @@
 
 use std::path::PathBuf;
 
+use serde::Serialize;
 use unilux_components::proton::{InstalledProton, PROVIDERS, Provider};
 use unilux_components::{ProtonId, Release};
 use unilux_core::{Error, Result, Severity};
@@ -9,7 +10,6 @@ use unilux_install::{Mode, Options};
 use unilux_patches::builder::{self, BuildPlan, Engine};
 use unilux_patches::{Catalog, PatchStatus, Plan, Source as PatchSource, TargetStatus};
 use unilux_system::VrStatus;
-use serde::Serialize;
 
 use crate::Service;
 

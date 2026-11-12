@@ -1,9 +1,9 @@
 use std::process::ExitCode;
 
+use serde::Serialize;
 use unilux_core::Severity;
 use unilux_diag::Finding;
 use unilux_service::Status;
-use serde::Serialize;
 
 pub const SCHEMA: u32 = 1;
 

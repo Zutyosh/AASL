@@ -12,16 +12,17 @@ mod somnium;
 mod tools;
 mod update;
 
-pub use unilux_patches::Source as PatchSource;
-pub use unilux_patches::{Library, Recipe};
 pub use recipes::RecipeInfo;
 pub use sessions::{SavedReport, Share};
 pub use somnium::{
     Account, LoginStep, OnlinePoint, OnlineStats, TwoFactor, TwoFactorMethod, UpcomingEvent,
 };
 pub use tools::{InstalledView, PatchFile, ReleaseView};
+pub use unilux_patches::Source as PatchSource;
+pub use unilux_patches::{Library, Recipe};
 pub use update::UpdateInfo;
 
+use serde::Serialize;
 use unilux_components::{CpuLevel, Downloader, Sources};
 use unilux_core::exec::{Exec, TokioExec};
 use unilux_core::{Config, Error, Event, Events, Paths, Result, Severity};
@@ -32,7 +33,6 @@ use unilux_runner::logs::LogLine;
 use unilux_runner::{LaunchOptions, Launcher, LogBuffer};
 use unilux_system::procs::ProcInfo;
 use unilux_system::{Host, OpenXrRuntime, RealHost, SystemReport, VrStatus};
-use serde::Serialize;
 
 pub use unilux_diag::FixId as Fix;
 pub use unilux_install::Options as InstallOptions;
@@ -378,7 +378,9 @@ impl Service {
         let proton_dir = proton
             .as_ref()
             .map(|p| unilux_install::proton_dir(&self.inner.paths, p));
-        let patches = proton_dir.as_ref().map(|d| unilux_patches::bundle::status(d));
+        let patches = proton_dir
+            .as_ref()
+            .map(|d| unilux_patches::bundle::status(d));
         let patch_match = proton
             .as_ref()
             .and_then(|p| self.catalog_now().resolve(p).first().map(|m| m.status));
@@ -611,7 +613,11 @@ mod tests {
         let env_only = "format = 1\nid = \"flat-yt\"\ntitle = \"Env only\"\ningredients = [\"ytdlp-android-client\"]\n";
         let info = s.recipe_import(env_only).unwrap();
         assert!(!info.needs_build && !info.custom_code && !info.builtin);
-        assert!(d.path().join(".config/unilux/recipes/flat-yt.toml").is_file());
+        assert!(
+            d.path()
+                .join(".config/unilux/recipes/flat-yt.toml")
+                .is_file()
+        );
 
         let mut cfg = s.config();
         cfg.recipe = Some("flat-yt".into());

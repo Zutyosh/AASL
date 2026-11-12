@@ -1,7 +1,7 @@
 //! Settings: a sidebar of sections, each a set of grouped rows.
 
-use unilux_service::LaunchOpts;
 use freya::prelude::*;
+use unilux_service::LaunchOpts;
 
 use crate::i18n::t;
 use crate::state::{Screen, Section, Ui};
@@ -157,7 +157,10 @@ fn view(mut ui: Ui) -> impl IntoElement {
                 .child(
                     rect()
                         .padding((space::S, space::M, 0., space::M))
-                        .child(muted(format!("Unilux {}", unilux_update::Version::current()))),
+                        .child(muted(format!(
+                            "Unilux {}",
+                            unilux_update::Version::current()
+                        ))),
                 ),
         )
         .child(

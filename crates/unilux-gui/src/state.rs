@@ -3,10 +3,10 @@
 use std::future::Future;
 use std::time::Duration;
 
+use freya::prelude::*;
 use unilux_core::{Event, Severity};
 use unilux_diag::Finding;
 use unilux_service::{Account, InstalledView, OnlineStats, ReleaseView, Status, UpcomingEvent};
-use freya::prelude::*;
 
 use crate::{approvals, svc};
 

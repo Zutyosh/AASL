@@ -21,8 +21,8 @@ mod wizard;
 
 use std::sync::OnceLock;
 
-use unilux_service::Service;
 use freya::prelude::*;
+use unilux_service::Service;
 
 static SERVICE: OnceLock<Service> = OnceLock::new();
 /// How we were started, so a restart runs the updated file.

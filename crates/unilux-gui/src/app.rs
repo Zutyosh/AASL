@@ -4,7 +4,7 @@
 use freya::prelude::*;
 
 use crate::state::{Screen, use_ui};
-use crate::theme::{RADIUS_PANEL, T, unilux_theme, alpha, size, space};
+use crate::theme::{RADIUS_PANEL, T, alpha, size, space, unilux_theme};
 use crate::{launcher, settings, widgets, wizard};
 
 pub const LOGO: &[u8] = include_bytes!("../assets/logo.png");

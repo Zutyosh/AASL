@@ -3,10 +3,10 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use serde::Serialize;
 use unilux_components::sources::GAME_ID;
 use unilux_core::Config;
 use unilux_system::{Host, OpenXrRuntime};
-use serde::Serialize;
 
 /// Larger shader caches: Mesa (AMD, Intel) and NVIDIA.
 pub const SHADER_CACHE: [(&str, &str); 2] = [

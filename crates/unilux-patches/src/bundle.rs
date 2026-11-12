@@ -3,9 +3,9 @@
 
 use std::path::{Path, PathBuf};
 
-use unilux_core::{Error, IoContext, Result, write_atomic};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use unilux_core::{Error, IoContext, Result, write_atomic};
 
 /// Bundle layout this Unilux installs. Matched exactly: a number names a
 /// shape, not a minimum (same rule as Somnilux's archive format).

@@ -8,8 +8,8 @@
 
 use std::path::{Path, PathBuf};
 
-use unilux_core::{Error, IoContext, Result, write_atomic};
 use serde::{Deserialize, Serialize};
+use unilux_core::{Error, IoContext, Result, write_atomic};
 
 use crate::download::{Checksum, Downloader};
 use crate::extract::{extract_to_staging, move_into_place};

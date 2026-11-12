@@ -1,9 +1,9 @@
 //! Diagnostics: what Unilux checked, what is wrong, and how to fix it.
 
+use freya::prelude::*;
 use unilux_core::Severity;
 use unilux_diag::checks::CHECKS;
 use unilux_diag::{Finding, FixId};
-use freya::prelude::*;
 
 use crate::i18n::{Lang, current, fill, tr};
 use crate::state::{Section, Ui};

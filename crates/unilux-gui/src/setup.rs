@@ -1,10 +1,10 @@
 //! The setup tunnel: pick a Proton, pick the fixes that go on it, then
 //! build and install the whole thing. One idea per page, one way forward.
 
+use freya::prelude::*;
 use unilux_components::ProtonId;
 use unilux_patches::recipe::{DEFAULT_RECIPE, Ingredient, Kind};
 use unilux_service::{PatchSource, Recipe};
-use freya::prelude::*;
 
 use crate::i18n::{fix_summary, fix_title, step, t};
 use crate::loader::OrbitLoader;

@@ -3,6 +3,7 @@
 
 use std::path::PathBuf;
 
+use serde::{Deserialize, Serialize};
 use unilux_components::ProtonId;
 use unilux_components::sources::LAUNCHER_REL_PATH;
 use unilux_core::{Config, Paths, Severity};
@@ -11,7 +12,6 @@ use unilux_patches::community::{DipCause, Perf};
 use unilux_patches::{PatchStatus, TargetStatus};
 use unilux_system::procs::ProcInfo;
 use unilux_system::{SystemReport, VrStatus};
-use serde::{Deserialize, Serialize};
 
 /// Fixes Unilux can apply itself. Anything not listed here is advice only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -590,9 +590,9 @@ fn launch_log(ctx: &DiagContext) -> Vec<Finding> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use unilux_system::{FakeHost, PythonVersion};
     use std::collections::HashSet;
     use std::path::Path;
+    use unilux_system::{FakeHost, PythonVersion};
 
     fn ctx(files: &[&str], f: impl FnOnce(&mut DiagContext)) -> DiagContext {
         let paths = Paths::resolve(|k| (k == "HOME").then(|| "/h".to_string())).unwrap();

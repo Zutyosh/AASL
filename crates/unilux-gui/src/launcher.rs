@@ -1,8 +1,8 @@
 //! The main screen, after the An Anime Team launchers: the key art, a
 //! compact status card bottom left, Settings and Play bottom right.
 
-use unilux_service::{LaunchOpts, Status};
 use freya::prelude::*;
+use unilux_service::{LaunchOpts, Status};
 
 use crate::i18n::t;
 use crate::state::{Screen, Ui};

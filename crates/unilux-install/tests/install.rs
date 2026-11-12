@@ -4,13 +4,13 @@ use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
+use sha2::{Digest, Sha256};
 use unilux_components::sources::LAUNCHER_REL_PATH;
 use unilux_components::{CpuLevel, Downloader, Sources};
 use unilux_core::exec::{BoxFuture, CommandSpec, Exec};
 use unilux_core::{Config, Events, Paths, Result};
 use unilux_install::{Installer, Mode, Options};
 use unilux_system::FakeHost;
-use sha2::{Digest, Sha256};
 use wiremock::matchers::path;
 use wiremock::{Mock, MockServer, ResponseTemplate};
 

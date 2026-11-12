@@ -4,8 +4,8 @@ use std::collections::BTreeMap;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use unilux_agent::ConfirmHook;
 use tokio::sync::oneshot;
+use unilux_agent::ConfirmHook;
 
 /// Open requests: id to (message, reply channel).
 type Pending = BTreeMap<u64, (String, Option<oneshot::Sender<bool>>)>;

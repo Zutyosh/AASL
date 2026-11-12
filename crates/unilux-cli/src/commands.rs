@@ -3,8 +3,8 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use unilux_service::Service;
 use clap::Subcommand;
+use unilux_service::Service;
 
 use crate::output::Out;
 
