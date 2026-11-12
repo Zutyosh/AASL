@@ -135,7 +135,12 @@ fn view(mut ui: Ui) -> impl IntoElement {
                                 .flat()
                                 .maybe(selected, |b| b.background(T.raised))
                                 .on_press(move |_| ui.section.set(s))
-                                .child(nav_row(section_icon(s), t(key).to_string(), selected, health(s)))
+                                .child(nav_row(
+                                    section_icon(s),
+                                    t(key).to_string(),
+                                    selected,
+                                    health(s),
+                                ))
                                 .into_element()
                         })
                         .collect::<Vec<_>>(),

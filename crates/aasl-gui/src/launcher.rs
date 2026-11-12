@@ -253,21 +253,20 @@ fn actions(mut ui: Ui, st: &Status) -> impl IntoElement {
                 glass_button(Icon::Wrench, t("play.repair"))
                     .on_press(move |_| ui.run(async { svc().repair().await }, |_| {}))
             }))
-            .child(glass_button(Icon::Monitor, t("play.flat")).on_press(move |_| {
+            .child(
+                glass_button(Icon::Monitor, t("play.flat")).on_press(move |_| {
+                    ui.run(
+                        async { svc().launch(LaunchOpts { allow_flat: true }).await },
+                        |_| {},
+                    )
+                }),
+            )
+            .child(play_button(t("play")).on_press(move |_| {
                 ui.run(
-                    async { svc().launch(LaunchOpts { allow_flat: true }).await },
+                    async { svc().launch(LaunchOpts { allow_flat: false }).await },
                     |_| {},
                 )
             }))
-            .child(
-                play_button(t("play"))
-                    .on_press(move |_| {
-                        ui.run(
-                            async { svc().launch(LaunchOpts { allow_flat: false }).await },
-                            |_| {},
-                        )
-                    }),
-            )
             .into_element()
     };
     row.child(play).child(settings)

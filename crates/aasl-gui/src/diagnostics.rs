@@ -402,8 +402,15 @@ fn finding_row(ui: Ui, running: State<bool>, f: &Finding) -> Element {
                 .child(body(head))
                 .maybe_child(advice.map(muted))
                 .maybe_child((!f.evidence.is_empty()).then(|| {
-                    Evidence(f.evidence.iter().take(4).cloned().collect::<Vec<_>>().join("\n"))
-                        .into_element()
+                    Evidence(
+                        f.evidence
+                            .iter()
+                            .take(4)
+                            .cloned()
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                    )
+                    .into_element()
                 })),
         )
         .child(side)
