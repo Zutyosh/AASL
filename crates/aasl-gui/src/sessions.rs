@@ -350,7 +350,12 @@ impl Component for SessionsTab {
                 .into_element();
         }
 
-        let hours: f32 = list.iter().map(|s| s.report.duration_s as f32).sum::<f32>() / 3600.;
+        let secs: u64 = list.iter().map(|s| s.report.duration_s).sum();
+        let played = if secs < 3600 {
+            format!("{} min", secs.div_ceil(60))
+        } else {
+            format!("{:.1} h", secs as f32 / 3600.)
+        };
         let fps: Vec<f32> = list
             .iter()
             .filter_map(|s| s.report.perf.map(|p| p.avg_fps))
@@ -361,7 +366,7 @@ impl Component for SessionsTab {
             .count();
         let summary = tiles(vec![
             tile(t("ses.sum.count"), list.len().to_string(), None),
-            tile(t("ses.sum.time"), format!("{hours:.1} h"), None),
+            tile(t("ses.sum.time"), played, None),
             tile(
                 t("ses.sum.fps"),
                 if fps.is_empty() {

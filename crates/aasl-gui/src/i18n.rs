@@ -934,6 +934,11 @@ const TABLE: &[(&str, &str, &str)] = &[
     ("prefs.agents", "Agents", "Agents"),
     ("prefs.lang", "Language", "Langue"),
     ("prefs.lang.auto", "Auto", "Auto"),
+    (
+        "prefs.lang.sub",
+        "Auto follows the language of your system",
+        "Auto suit la langue du système",
+    ),
     ("prefs.wait", "Wait for the headset", "Attendre le casque"),
     (
         "prefs.wait.sub",

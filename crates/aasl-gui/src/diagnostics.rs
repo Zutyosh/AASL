@@ -10,7 +10,7 @@ use crate::state::{Section, Ui};
 use crate::svc;
 use crate::theme::space;
 use crate::widgets::{
-    Tone, banner, body, chip, divided, group, mono_box, muted, row, severity_tone, title,
+    Tone, banner, body, chip, divided, group, mono_box, muted, row, severity_tone,
 };
 
 #[derive(PartialEq)]
@@ -340,6 +340,38 @@ fn vr_owned(f: &Finding) -> bool {
                 || f.title.starts_with("XR overlay")))
 }
 
+/// The raw evidence of a finding (paths, commands), folded until asked for.
+#[derive(PartialEq)]
+struct Evidence(String);
+
+impl Component for Evidence {
+    fn render(&self) -> impl IntoElement {
+        let mut open = use_state(|| false);
+        let shown = *open.read();
+        rect()
+            .width(Size::fill())
+            .spacing(space::XS)
+            .child(
+                Button::new()
+                    .flat()
+                    .compact()
+                    .padding((space::XS, 0.))
+                    .on_press(move |_| open.set(!shown))
+                    .child(
+                        label()
+                            .text(if shown {
+                                tr("Hide details", "Masquer les détails")
+                            } else {
+                                tr("Details", "Détails")
+                            })
+                            .font_size(crate::theme::size::SMALL)
+                            .color(crate::theme::T.muted),
+                    ),
+            )
+            .maybe_child(shown.then(|| mono_box(self.0.clone())))
+    }
+}
+
 fn finding_row(ui: Ui, running: State<bool>, f: &Finding) -> Element {
     let (head, advice) = localized(f);
     let fix = f.fix;
@@ -370,14 +402,8 @@ fn finding_row(ui: Ui, running: State<bool>, f: &Finding) -> Element {
                 .child(body(head))
                 .maybe_child(advice.map(muted))
                 .maybe_child((!f.evidence.is_empty()).then(|| {
-                    mono_box(
-                        f.evidence
-                            .iter()
-                            .take(4)
-                            .cloned()
-                            .collect::<Vec<_>>()
-                            .join("\n"),
-                    )
+                    Evidence(f.evidence.iter().take(4).cloned().collect::<Vec<_>>().join("\n"))
+                        .into_element()
                 })),
         )
         .child(side)
@@ -405,13 +431,12 @@ fn view(mut ui: Ui) -> impl IntoElement {
         + usize::from(vr_attention);
 
     let rerun = Button::new()
-        .filled()
         .enabled(!busy)
         .on_press(move |_| {
             spawn_in_window(run_checks(ui, running));
         })
         .child(if busy {
-            tr("Checking...", "Vérification...")
+            tr("Checking…", "Vérification…")
         } else {
             tr("Check again", "Relancer")
         })
@@ -426,7 +451,7 @@ fn view(mut ui: Ui) -> impl IntoElement {
     let verdict = if findings.is_none() {
         banner(
             Tone::Neutral,
-            tr("Checking...", "Vérification en cours..."),
+            tr("Checking…", "Vérification en cours…"),
             tr("This takes a few seconds.", "Cela prend quelques secondes."),
             Some(rerun),
         )
@@ -579,8 +604,7 @@ fn view(mut ui: Ui) -> impl IntoElement {
 
     rect()
         .spacing(space::XL)
-        .child(title(tr("Diagnostics", "Diagnostic")))
-        .child(muted(tr(
+        .child(crate::widgets::page_header(tr("Diagnostics", "Diagnostic"), tr(
             "When something does not work, start here. AASL checks the install, the system and your last launch, and fixes what it can.",
             "Quand quelque chose ne marche pas, commencez ici. AASL vérifie l'installation, le système et le dernier lancement, et corrige ce qu'il peut.",
         )))

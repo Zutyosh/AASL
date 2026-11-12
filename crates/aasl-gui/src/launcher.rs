@@ -8,17 +8,47 @@ use crate::i18n::t;
 use crate::state::{Screen, Ui};
 use crate::theme::glass;
 use crate::theme::{RADIUS_PILL, size, space};
-use crate::widgets::{Tone, chip, glass_panel, muted, percent, pill, settings_icon, stat};
+use crate::theme::{T, alpha};
+use crate::widgets::{Icon, Tone, chip, glass_panel, muted, percent, pill, settings_icon, stat};
 
-/// A secondary action on the key art: frosted, pill-shaped.
-fn glass_button(text: &str) -> Button {
+/// A secondary action on the key art: frosted, pill-shaped, with its icon.
+fn glass_button(icon: Icon, text: &str) -> Button {
     Button::new()
         .background(glass())
-        .hover_background(crate::theme::alpha(crate::theme::T.raised, 0.9))
-        .border_fill(crate::theme::alpha(crate::theme::T.text, 0.08))
+        .hover_background(alpha(T.raised, 0.9))
+        .border_fill(alpha(T.text, 0.1))
         .corner_radius(RADIUS_PILL)
-        .padding((14., 22.))
-        .child(text.to_string())
+        .padding((14., 20.))
+        .child(
+            rect()
+                .horizontal()
+                .cross_align(Alignment::Center)
+                .spacing(space::S)
+                .child(icon.view(18., T.text))
+                .child(text.to_string()),
+        )
+}
+
+/// Play: the one bright control on the screen.
+fn play_button(text: &str) -> Button {
+    Button::new()
+        .filled()
+        .corner_radius(RADIUS_PILL)
+        .padding((16., 40.))
+        .child(
+            rect()
+                .horizontal()
+                .cross_align(Alignment::Center)
+                .spacing(space::M)
+                .child(Icon::Play.view(22., T.bg))
+                .child(
+                    label()
+                        .text(text.to_string())
+                        .font_size(size::LEAD + 2.)
+                        .font_weight(FontWeight::MEDIUM)
+                        .color(T.bg),
+                ),
+        )
 }
 use crate::{app, svc};
 
@@ -140,7 +170,7 @@ fn status_card(st: &Status) -> impl IntoElement {
         .unwrap_or_else(|| t("stat.none").into());
     glass_panel()
         .horizontal()
-        .spacing(space::XL)
+        .spacing(space::XXL)
         .padding((space::M, space::XL))
         .child(stat(t("stat.vr"), vr, vr_tone))
         .child(stat(t("stat.proton"), proton, proton_tone))
@@ -220,19 +250,17 @@ fn actions(mut ui: Ui, st: &Status) -> impl IntoElement {
             .spacing(space::S)
             .cross_align(Alignment::Center)
             .maybe_child(needs_repair.then(|| {
-                glass_button(t("play.repair"))
+                glass_button(Icon::Wrench, t("play.repair"))
                     .on_press(move |_| ui.run(async { svc().repair().await }, |_| {}))
             }))
-            .child(glass_button(t("play.flat")).on_press(move |_| {
+            .child(glass_button(Icon::Monitor, t("play.flat")).on_press(move |_| {
                 ui.run(
                     async { svc().launch(LaunchOpts { allow_flat: true }).await },
                     |_| {},
                 )
             }))
             .child(
-                pill(t("play"))
-                    .corner_radius(RADIUS_PILL)
-                    .padding((14., 52.))
+                play_button(t("play"))
                     .on_press(move |_| {
                         ui.run(
                             async { svc().launch(LaunchOpts { allow_flat: false }).await },

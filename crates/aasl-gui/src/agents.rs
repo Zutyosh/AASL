@@ -9,7 +9,7 @@ use crate::i18n::{fill, tr};
 use crate::state::Ui;
 use crate::svc;
 use crate::theme::{T, size, space};
-use crate::widgets::{Tone, banner, body, chip, divided, group, mono_box, muted, row, title};
+use crate::widgets::{Tone, banner, body, chip, divided, group, mono_box, muted, row};
 use crate::{approvals, sessions};
 
 #[derive(PartialEq)]
@@ -344,15 +344,15 @@ fn step(n: usize, head: &str, text: &str, code: Option<&str>) -> Element {
                 .width(Size::px(26.))
                 .height(Size::px(26.))
                 .corner_radius(13.)
-                .background(crate::theme::alpha(T.accent, 0.18))
+                .background(T.raised)
                 .main_align(Alignment::Center)
                 .cross_align(Alignment::Center)
                 .child(
                     label()
                         .text(n.to_string())
                         .font_size(size::SMALL)
-                        .font_weight(FontWeight::SEMI_BOLD)
-                        .color(T.accent),
+                        .font_weight(FontWeight::MEDIUM)
+                        .color(T.muted),
                 ),
         )
         .child(
@@ -631,10 +631,9 @@ fn view(ui: Ui) -> impl IntoElement {
 
     rect()
         .spacing(space::XL)
-        .child(title(tr("Agents", "Agents")))
-        .child(muted(tr(
-            "A coding agent (Claude Code, Cursor...) can use AASL for you: read its logs, run the checks, test fixes, write recipes. You stay in charge of anything that changes your setup.",
-            "Un agent de code (Claude Code, Cursor...) peut se servir d'AASL pour vous : lire ses journaux, lancer les vérifications, tester des corrections, écrire des recettes. Vous gardez la main sur tout ce qui modifie votre installation.",
+        .child(crate::widgets::page_header(tr("Agents", "Agents"), tr(
+            "A coding agent like Claude Code can read AASL's logs, run checks and test fixes; changes to your setup wait for your approval.",
+            "Un agent de code comme Claude Code peut lire les journaux d'AASL, lancer les vérifications et tester des corrections ; toute modification de votre installation attend votre accord.",
         )))
         .child(verdict)
         .maybe_child((!asks.is_empty()).then(|| group(tr("Waiting for you", "En attente de vous"), asks)))

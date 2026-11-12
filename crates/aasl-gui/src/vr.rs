@@ -9,7 +9,7 @@ use crate::i18n::{fill, tr};
 use crate::state::{Section, Ui};
 use crate::svc;
 use crate::theme::{T, alpha, size, space};
-use crate::widgets::{Tone, banner, body, chip, divided, group, mono_box, muted, title};
+use crate::widgets::{Tone, banner, body, chip, divided, group, mono_box, muted};
 
 #[derive(PartialEq)]
 pub struct VrSection(pub Ui);
@@ -320,7 +320,7 @@ fn step_row(num: Option<usize>, s: &Step) -> Element {
                 .maybe_child(
                     s.todo
                         .clone()
-                        .map(|t| label().text(t).font_size(size::SMALL).color(T.warn)),
+                        .map(|t| label().text(t).font_size(size::SMALL).color(T.text)),
                 )
                 .maybe_child(s.cmd.clone().map(mono_box)),
         )
@@ -475,8 +475,7 @@ fn view(mut ui: Ui) -> impl IntoElement {
 
     rect()
         .spacing(space::XL)
-        .child(title(tr("VR headset", "Casque VR")))
-        .child(muted(tr(
+        .child(crate::widgets::page_header(tr("VR headset", "Casque VR"), tr(
             "Somnium Space is played with a VR headset. This page checks that the path from headset to game is complete. It starts nothing.",
             "Somnium Space se joue avec un casque VR. Cette page vérifie que le chemin du casque au jeu est complet. Elle ne lance rien.",
         )))

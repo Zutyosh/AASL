@@ -22,12 +22,12 @@ pub struct Tokens {
 }
 
 pub const T: &Tokens = &Tokens {
-    bg: (0x16, 0x15, 0x1b),
-    surface: (0x21, 0x1f, 0x28),
-    raised: (0x2c, 0x29, 0x35),
-    border: (0x3a, 0x36, 0x45),
-    text: (0xf3, 0xf0, 0xfa),
-    muted: (0xab, 0xa6, 0xba),
+    bg: (0x11, 0x11, 0x13),
+    surface: (0x19, 0x19, 0x1c),
+    raised: (0x24, 0x24, 0x28),
+    border: (0x30, 0x30, 0x35),
+    text: (0xec, 0xec, 0xef),
+    muted: (0x9b, 0x9b, 0xa4),
     accent: (0xb6, 0x9a, 0xff),
     accent_hover: (0xc9, 0xb6, 0xff),
     accent_text: (0x16, 0x10, 0x2a),
@@ -51,7 +51,7 @@ pub mod size {
     pub const SMALL: f32 = 13.;
     pub const BODY: f32 = 15.;
     pub const LEAD: f32 = 18.;
-    pub const TITLE: f32 = 24.;
+    pub const TITLE: f32 = 26.;
     pub const DISPLAY: f32 = 36.;
 }
 
@@ -94,9 +94,40 @@ pub fn aasl_theme() -> Theme {
     k.text_secondary = c(T.muted);
     k.text_inverse = c(T.accent_text);
     k.focus = c(T.accent);
+    // Primary actions are off-white on graphite: the violet stays for the
+    // key art, the selection, toggles and progress, so it never competes.
+    t.set(
+        "filled_button",
+        ButtonColorsThemePreference {
+            background: Preference::Specific(c(T.text)),
+            hover_background: Preference::Specific(Color::WHITE),
+            border_fill: Preference::Specific(Color::TRANSPARENT),
+            focus_border_fill: Preference::Specific(c(T.accent)),
+            color: Preference::Specific(c(T.bg)),
+        },
+    );
+    t.set(
+        "switch",
+        SwitchColorsThemePreference {
+            background: Preference::Specific(c(T.border)),
+            thumb_background: Preference::Specific(c(T.muted)),
+            toggled_background: Preference::Specific(c(T.accent)),
+            toggled_thumb_background: Preference::Specific(c(T.accent_text)),
+            focus_border_fill: Preference::Specific(c(T.accent)),
+        },
+    );
+    t.set(
+        "progressbar",
+        ProgressBarThemePreference {
+            color: Preference::Specific(c(T.text)),
+            background: Preference::Specific(alpha(T.text, 0.12)),
+            progress_background: Preference::Specific(c(T.accent)),
+            height: Preference::Specific(6.),
+        },
+    );
     for (key, pad) in [
-        ("button_layout", Gaps::new(9., 18., 9., 18.)),
-        ("compact_button_layout", Gaps::new(5., 10., 5., 10.)),
+        ("button_layout", Gaps::new(8., 16., 8., 16.)),
+        ("compact_button_layout", Gaps::new(4., 10., 4., 10.)),
         ("expanded_button_layout", Gaps::new(12., 20., 12., 20.)),
     ] {
         t.set(

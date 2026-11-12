@@ -20,13 +20,13 @@ All colours and type go through `crates/aasl-gui/src/theme.rs`. No literal colou
 
 | Token | Value | Use |
 |---|---|---|
-| `bg` | #16151b | window background |
-| `surface` | #211f28 | sidebar, row groups |
-| `raised` | #2c2935 | selected item, toasts |
-| `border` | #3a3645 | separators, input outlines |
-| `text` | #f3f0fa | body text |
-| `muted` | #aba6ba | secondary text |
-| `accent` | #b69aff | the primary action, focus ring, logo play mark |
+| `bg` | #111113 | window background |
+| `surface` | #19191c | sidebar, row groups |
+| `raised` | #242428 | selected item, toasts |
+| `border` | #303035 | separators, input outlines |
+| `text` | #ececef | body text |
+| `muted` | #9b9ba4 | secondary text |
+| `accent` | #b69aff | selection, toggles, progress, focus ring, logo; primary buttons are off-white `text` on `bg` |
 | `glass` | `bg` at 62 % | panels over the key art, 30 px backdrop blur |
 | `ok` | #7cd39a | healthy state |
 | `warn` | #f0c65a | needs attention |
@@ -34,7 +34,9 @@ All colours and type go through `crates/aasl-gui/src/theme.rs`. No literal colou
 
 Dark only. The accent was picked from Somnium's key art (violet night, pink lights).
 
-Type: one family (Inter, system sans fallback). Sizes 13 / 15 / 18 / 24 / 36. Body never below 15. Headings use a single weight (600).
+Type: one family (Inter, system sans fallback). Sizes 13 / 15 / 18 / 26 / 36. Body never below 15. Two weights: 400 and 500; hierarchy comes from size and colour. Group headings are small muted labels.
+
+Icons: one line set (lucide shapes, `widgets::Icon`), 1.5 stroke, coloured like their text. Neutrals are graphite; Somnium's violet lives in the key art and the accent, not in surfaces. Status banners stay neutral and carry their tone in a dot.
 
 Spacing scale: 4, 8, 12, 16, 24, 32, 48. Radius: 10 for controls, 16 for panels, pills for the main actions; never a panel inside a panel.
 

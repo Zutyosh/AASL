@@ -37,13 +37,13 @@ fn tab_button(
         .key(label_text)
         .compact()
         .corner_radius(RADIUS_PILL)
-        .maybe(selected, |b| b.filled())
-        .maybe(!selected, |b| b.flat())
+        .flat()
+        .maybe(selected, |b| b.background(T.raised))
         .on_press(on)
         .child(
             label()
                 .text(t(label_text))
-                .color(if selected { T.accent_text } else { T.text }),
+                .color(if selected { T.text } else { T.muted }),
         )
         .into_element()
 }

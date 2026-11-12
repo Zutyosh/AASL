@@ -7,8 +7,8 @@ use crate::i18n::t;
 use crate::state::{Screen, Section, Ui};
 
 use crate::svc;
-use crate::theme::{T, alpha, size, space};
-use crate::widgets::{group, muted, row, title};
+use crate::theme::{T, size, space};
+use crate::widgets::{Icon, Tone, dot, group, muted, row, title};
 
 const SECTIONS: &[(Section, &str)] = &[
     (Section::General, "prefs.general"),
@@ -47,33 +47,79 @@ fn view(mut ui: Ui) -> impl IntoElement {
         Section::Logs => logs(ui).into_element(),
         Section::Agents => crate::agents::AgentsSection(ui).into_element(),
     };
+    let st = ui.status.read().clone();
+    let findings = ui.findings.read().clone();
+    let pending = !ui.approvals.read().is_empty();
+    let health = move |s: Section| -> Option<Tone> {
+        match s {
+            Section::Vr => Some(if st.vr.ready { Tone::Ok } else { Tone::Warn }),
+            Section::Recipes => Some(
+                if st.proton.is_some() && st.patches.as_ref().is_some_and(|p| p.intact) {
+                    Tone::Ok
+                } else {
+                    Tone::Warn
+                },
+            ),
+            Section::Diagnostics => findings.as_ref().map(|f| {
+                if f.iter().any(|f| f.severity == aasl_core::Severity::Error) {
+                    Tone::Error
+                } else if f.iter().any(|f| f.severity == aasl_core::Severity::Warn) {
+                    Tone::Warn
+                } else {
+                    Tone::Ok
+                }
+            }),
+            Section::Agents => pending.then_some(Tone::Accent),
+            _ => None,
+        }
+    };
+    let nav_row = |icon: Icon, text: String, selected: bool, dot_tone: Option<Tone>| {
+        let fg = if selected { T.text } else { T.muted };
+        rect()
+            .width(Size::fill())
+            .height(Size::px(36.))
+            .horizontal()
+            .content(Content::Flex)
+            .cross_align(Alignment::Center)
+            .spacing(space::M)
+            .child(icon.view(18., fg))
+            .child(
+                label()
+                    .text(text)
+                    .width(Size::flex(1.))
+                    .color(fg)
+                    .font_weight(if selected {
+                        FontWeight::MEDIUM
+                    } else {
+                        FontWeight::NORMAL
+                    }),
+            )
+            .maybe_child(dot_tone.map(dot))
+    };
     rect()
         .expanded()
         .horizontal()
         .content(Content::Flex)
         .child(
             rect()
-                .width(Size::px(236.))
+                .width(Size::px(288.))
                 .height(Size::fill())
-                .padding(space::L)
-                .spacing(2.)
+                .content(Content::Flex)
+                .padding((space::XL, space::M))
+                .spacing(space::XS)
                 .background(T.surface)
                 .border(
                     Border::new()
-                        .fill(T.border)
-                        .width(1.)
+                        .fill(crate::widgets::hairline())
+                        .width(BorderWidth {
+                            right: 1.,
+                            ..Default::default()
+                        })
                         .alignment(BorderAlignment::Inner),
                 )
                 .child(
-                    Button::new()
-                        .compact()
-                        .flat()
-                        .on_press(move |_| ui.screen.set(Screen::Launcher))
-                        .child(format!("← {}", t("nav.back"))),
-                )
-                .child(
                     rect()
-                        .padding((space::S, space::S, space::XL, space::S))
+                        .padding((0., space::M, space::XL, space::M))
                         .child(crate::app::brand()),
                 )
                 .children(
@@ -84,29 +130,29 @@ fn view(mut ui: Ui) -> impl IntoElement {
                             let selected = s == section;
                             Button::new()
                                 .key(*key)
-                                .expanded()
+                                .width(Size::fill())
+                                .padding((0., space::M))
                                 .flat()
-                                .background(if selected {
-                                    alpha(T.raised, 1.0)
-                                } else {
-                                    alpha(T.bg, 0.0)
-                                })
+                                .maybe(selected, |b| b.background(T.raised))
                                 .on_press(move |_| ui.section.set(s))
-                                .child(
-                                    rect().width(Size::fill()).child(
-                                        label()
-                                            .text(t(key))
-                                            .color(if selected { T.text } else { T.muted })
-                                            .font_weight(if selected {
-                                                FontWeight::MEDIUM
-                                            } else {
-                                                FontWeight::NORMAL
-                                            }),
-                                    ),
-                                )
+                                .child(nav_row(section_icon(s), t(key).to_string(), selected, health(s)))
                                 .into_element()
                         })
                         .collect::<Vec<_>>(),
+                )
+                .child(rect().height(Size::flex(1.)))
+                .child(
+                    Button::new()
+                        .width(Size::fill())
+                        .padding((0., space::M))
+                        .flat()
+                        .on_press(move |_| ui.screen.set(Screen::Launcher))
+                        .child(nav_row(Icon::Back, t("nav.back").to_string(), false, None)),
+                )
+                .child(
+                    rect()
+                        .padding((space::S, space::M, 0., space::M))
+                        .child(muted(format!("AASL {}", aasl_update::Version::current()))),
                 ),
         )
         .child(
@@ -122,6 +168,17 @@ fn view(mut ui: Ui) -> impl IntoElement {
                         .child(content),
                 ),
         )
+}
+
+fn section_icon(s: Section) -> Icon {
+    match s {
+        Section::General => Icon::Gear,
+        Section::Recipes => Icon::Flask,
+        Section::Vr => Icon::Headset,
+        Section::Diagnostics => Icon::Pulse,
+        Section::Logs => Icon::Lines,
+        Section::Agents => Icon::Bot,
+    }
 }
 
 fn general(mut ui: Ui) -> impl IntoElement {

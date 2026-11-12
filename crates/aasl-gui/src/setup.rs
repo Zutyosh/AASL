@@ -607,7 +607,7 @@ struct FixesStep {
 
 fn kind_chip(ing: &Ingredient) -> Rect {
     match ing.kind {
-        Kind::Patch => chip(t("recipes.kind.patch"), Tone::Accent),
+        Kind::Patch => chip(t("recipes.kind.patch"), Tone::Neutral),
         Kind::Env => chip(t("recipes.kind.env"), Tone::Neutral),
     }
 }

@@ -103,7 +103,7 @@ pub fn events_panel(mut ui: Ui) -> Element {
                                 .max_lines(2)
                                 .width(Size::flex(1.)),
                         )
-                        .child(countdown(next)),
+                        .child(countdown(next, true)),
                 )
                 .child(body(when(next)).color(alpha(T.text, 0.85)))
                 .maybe_child(meta(next).map(muted))
@@ -130,11 +130,7 @@ fn banner(img: Option<std::path::PathBuf>) -> Element {
             .height(Size::px(h))
             .aspect_ratio(AspectRatio::Max)
             .into_element(),
-        None => rect()
-            .width(Size::fill())
-            .height(Size::px(space::XS))
-            .background(alpha(T.accent, 0.6))
-            .into_element(),
+        None => rect().into_element(),
     }
 }
 
@@ -162,10 +158,11 @@ fn later(ev: &UpcomingEvent) -> Rect {
                 )
                 .child(muted(when(ev))),
         )
-        .child(countdown(ev))
+        .child(countdown(ev, false))
 }
 
-fn countdown(ev: &UpcomingEvent) -> Rect {
+/// Time until the event; only the next one carries the accent.
+fn countdown(ev: &UpcomingEvent, next: bool) -> Rect {
     let now = Local::now().timestamp().max(0) as u64;
     let (text, tone) = if ev.start <= now {
         (tr("On now", "En cours").to_string(), Tone::Ok)
@@ -178,7 +175,10 @@ fn countdown(ev: &UpcomingEvent) -> Rect {
             (d, Lang::Fr) => format!("{d} j {h} h"),
             (d, Lang::En) => format!("{d} d {h} h"),
         };
-        (fill(tr("in {}", "dans {}"), &[t]), Tone::Accent)
+        (
+            fill(tr("in {}", "dans {}"), &[t]),
+            if next { Tone::Accent } else { Tone::Neutral },
+        )
     };
     rect()
         .padding((3., 10.))
