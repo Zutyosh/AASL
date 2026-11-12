@@ -159,12 +159,13 @@ mod tests {
         let c = Catalog::parse(t).unwrap();
         let m = c.resolve(&ProtonId::new("ge", "GE-Proton11-12"));
         assert_eq!(m[0].status, TargetStatus::Untested);
+        let e = Catalog::embedded();
+        let m = e.resolve(&ProtonId::new("ge", "GE-Proton11-12"));
         assert!(
-            Catalog::embedded()
-                .resolve(&ProtonId::new("ge", "GE-Proton11-12"))
-                .is_empty(),
+            m.iter().all(|m| m.bundle.id != "somnilux-build-1"),
             "11-5's winedmo must not replace a newer GE's"
         );
+        assert_eq!(m[0].status, TargetStatus::Verified);
         assert!(c.resolve(&ProtonId::new("ge", "GE-Proton10-4")).is_empty());
         assert!(
             c.resolve(&ProtonId::new("cachyos", "cachyos-11.0-20261015-slr"))

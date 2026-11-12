@@ -28,14 +28,14 @@ Proton only hands OpenXR to a game when an OpenVR runtime is registered, so Mona
 
 ## Compatibility recipes
 
-A recipe is a Proton plus the fixes Somnium needs on it (TLS sign-in, video streams, YouTube sound). `recommended` is built in; make your own, share them as one TOML file, or let an agent write them over MCP. See `patches/README.md`.
+A recipe is a Proton plus the fixes Somnium needs on it. On the latest GE-Proton, `recommended` adds the TLS sign-in fix and keeps the launcher alive when a headset connects; GE-Proton handles video itself. `recommended` is built in; make your own, share them as one TOML file, or let an agent write them over MCP. See `patches/README.md`.
 
 ```sh
 aasl recipe list                    # recipes, * = in use
 aasl recipe use recommended         # switch, build if needed, repair
 aasl recipe build --proton ge:GE-Proton11-12   # build in podman/docker
 aasl proton available cachyos       # upstream releases, with patch status
-aasl proton use ge:GE-Proton11-5    # switch Proton under the current recipe
+aasl proton use ge:GE-Proton11-12   # switch Proton under the current recipe
 aasl patch status                   # bundle installed, files intact?
 aasl session list                   # what each play session showed (crashes, worlds, videos, fps)
 aasl recipe verdict mine            # where a recipe stands, same rules as the community bot
