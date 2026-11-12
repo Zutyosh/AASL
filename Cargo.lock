@@ -5039,7 +5039,7 @@ checksum = "c6f5d3c3b1bf09027a88a6bc961fc00497d651009560b5463668dc81b0fa87a8"
 
 [[package]]
 name = "unilux-agent"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -5054,7 +5054,7 @@ dependencies = [
 
 [[package]]
 name = "unilux-cli"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "clap",
  "nix",
@@ -5072,7 +5072,7 @@ dependencies = [
 
 [[package]]
 name = "unilux-components"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "flate2",
  "futures-util",
@@ -5093,7 +5093,7 @@ dependencies = [
 
 [[package]]
 name = "unilux-core"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -5105,7 +5105,7 @@ dependencies = [
 
 [[package]]
 name = "unilux-diag"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -5119,7 +5119,7 @@ dependencies = [
 
 [[package]]
 name = "unilux-gui"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "chrono",
  "freya",
@@ -5140,7 +5140,7 @@ dependencies = [
 
 [[package]]
 name = "unilux-install"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "flate2",
  "hex",
@@ -5161,7 +5161,7 @@ dependencies = [
 
 [[package]]
 name = "unilux-patches"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "hex",
  "serde",
@@ -5176,7 +5176,7 @@ dependencies = [
 
 [[package]]
 name = "unilux-runner"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "nix",
  "serde",
@@ -5192,7 +5192,7 @@ dependencies = [
 
 [[package]]
 name = "unilux-service"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "reqwest",
  "serde",
@@ -5213,7 +5213,7 @@ dependencies = [
 
 [[package]]
 name = "unilux-system"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -5223,7 +5223,7 @@ dependencies = [
 
 [[package]]
 name = "unilux-update"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "flate2",
  "hex",
