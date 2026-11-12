@@ -1,7 +1,7 @@
 name: Release
 
 # Push a tag like v0.2.0 (or v0.3.0-beta.1 for a pre-release) to publish
-# the AppImage and the portable tarball. Running copies of AASL find the
+# the AppImage and the portable tarball. Running copies of Unilux find the
 # release through the GitHub API and update themselves from these assets.
 on:
   push:
@@ -21,7 +21,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev libgl1-mesa-dev clang file
       - name: Tag matches the crate version
         run: |
-          crate=$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"]=="aasl-cli"))')
+          crate=$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"]=="unilux-cli"))')
           [ "v$crate" = "${GITHUB_REF_NAME}" ] || { echo "tag ${GITHUB_REF_NAME} != Cargo version $crate"; exit 1; }
       - run: cargo test --workspace --release
       - name: appimagetool
@@ -36,8 +36,8 @@ jobs:
         run: |
           ./packaging/build-appimage.sh
           mkdir -p dist
-          cp target/appimage/AASL-x86_64.AppImage dist/
-          tar -czf dist/aasl-x86_64-linux.tar.gz -C target/release aasl aasl-gui
+          cp target/appimage/Unilux-x86_64.AppImage dist/
+          tar -czf dist/unilux-x86_64-linux.tar.gz -C target/release unilux unilux-gui
           cd dist && for f in *; do sha256sum "$f" > "$f.sha256"; done
       - name: Publish
         env:
@@ -45,4 +45,4 @@ jobs:
         run: |
           pre=""
           case "${GITHUB_REF_NAME}" in *-*) pre="--prerelease" ;; esac
-          gh release create "${GITHUB_REF_NAME}" $pre --title "AASL ${GITHUB_REF_NAME#v}" --generate-notes dist/*
+          gh release create "${GITHUB_REF_NAME}" $pre --title "Unilux ${GITHUB_REF_NAME#v}" --generate-notes dist/*

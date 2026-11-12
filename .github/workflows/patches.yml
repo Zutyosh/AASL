@@ -27,17 +27,17 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: System libraries
         run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev clang podman
-      - name: Build aasl
-        run: cargo build --release -p aasl-cli
+      - name: Build unilux
+        run: cargo build --release -p unilux-cli
       - name: Build the bundle
         env:
-          AASL_PATCHES_DIR: ${{ github.workspace }}/patches
+          UNILUX_PATCHES_DIR: ${{ github.workspace }}/patches
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PROTON: ${{ inputs.proton }}
           RECIPE: ${{ inputs.recipe }}
         run: |
-          ./target/release/aasl recipe show "$RECIPE"
-          ./target/release/aasl recipe build "$RECIPE" --proton "$PROTON"
+          ./target/release/unilux recipe show "$RECIPE"
+          ./target/release/unilux recipe build "$RECIPE" --proton "$PROTON"
       - name: Publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -46,7 +46,7 @@ jobs:
         run: |
           id="$PROTON"
           tag="patches-$RECIPE-${id/:/-}-${{ github.run_number }}"
-          out=~/.cache/aasl/patch-builder/out
+          out=~/.cache/unilux/patch-builder/out
           gh release create "$tag" --prerelease --title "Recipe $RECIPE for $id" \
             --notes "Built from $(git rev-parse --short HEAD). Add it to data/catalog.toml as untested, then verified once someone has played with it." \
             "$out"/*.tar.gz "$out"/*.sha256

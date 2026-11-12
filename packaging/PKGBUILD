@@ -1,36 +1,36 @@
-# Maintainer: AASL contributors
-pkgname=aasl
+# Maintainer: Unilux contributors
+pkgname=unilux
 pkgver=0.3.0
 pkgrel=1
 pkgdesc="Install, launch and troubleshoot Somnium Space on Linux"
 arch=('x86_64')
-url="https://github.com/Zutyosh/AASL"
+url="https://github.com/Zutyosh/Unilux"
 license=('MIT')
 depends=('python' 'fontconfig' 'libxkbcommon' 'vulkan-icd-loader')
 optdepends=('imagemagick: menu icon conversion'
             'vulkan-tools: GPU diagnostics')
 makedepends=('cargo' 'clang')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
-# The archive unpacks to AASL-$pkgver.
+# The archive unpacks to Unilux-$pkgver.
 sha256sums=('SKIP')
 
 build() {
-    cd "$srcdir/AASL-$pkgver"
-    cargo build --release --locked -p aasl-cli -p aasl-gui
+    cd "$srcdir/Unilux-$pkgver"
+    cargo build --release --locked -p unilux-cli -p unilux-gui
 }
 
 check() {
-    cd "$srcdir/AASL-$pkgver"
-    cargo test --release --locked --workspace --exclude aasl-gui
+    cd "$srcdir/Unilux-$pkgver"
+    cargo test --release --locked --workspace --exclude unilux-gui
 }
 
 package() {
-    cd "$srcdir/AASL-$pkgver"
-    install -Dm755 target/release/aasl "$pkgdir/usr/bin/aasl"
-    install -Dm755 target/release/aasl-gui "$pkgdir/usr/bin/aasl-gui"
-    install -Dm644 packaging/aasl.desktop "$pkgdir/usr/share/applications/aasl.desktop"
-    install -Dm644 assets/aasl-256.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/aasl.png"
-    install -Dm644 assets/aasl-logo.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/aasl.svg"
+    cd "$srcdir/Unilux-$pkgver"
+    install -Dm755 target/release/unilux "$pkgdir/usr/bin/unilux"
+    install -Dm755 target/release/unilux-gui "$pkgdir/usr/bin/unilux-gui"
+    install -Dm644 packaging/unilux.desktop "$pkgdir/usr/share/applications/unilux.desktop"
+    install -Dm644 assets/unilux-256.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/unilux.png"
+    install -Dm644 assets/unilux-logo.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/unilux.svg"
     install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
     install -Dm644 patches/LICENSE "$pkgdir/usr/share/licenses/$pkgname/PATCHES-LGPL"
 }

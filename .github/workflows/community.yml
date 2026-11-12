@@ -2,7 +2,7 @@ name: Community recipe
 
 # Turns a "Compatibility recipe" issue into a judged pull request. The
 # issue body is untrusted: it only ever reaches the shell through files and
-# environment variables, and aasl validates the recipe (declarative TOML,
+# environment variables, and unilux validates the recipe (declarative TOML,
 # ids restricted to [a-z0-9_-]) before anything uses its id. Nothing from
 # the submission is built or run here.
 on:
@@ -31,8 +31,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Build aasl
-        run: cargo build --release -p aasl-cli
+      - name: Build unilux
+        run: cargo build --release -p unilux-cli
       - name: Read the form
         env:
           BODY: ${{ github.event.issue.body }}
@@ -41,9 +41,9 @@ jobs:
         id: judge
         env:
           SUB: ${{ runner.temp }}/sub
-          AASL_PATCHES_DIR: ${{ github.workspace }}/patches
+          UNILUX_PATCHES_DIR: ${{ github.workspace }}/patches
           ISSUE: ${{ github.event.issue.number }}
-        run: bash tools/community/judge.sh ./target/release/aasl "$SUB" "$ISSUE" . | tee -a "$GITHUB_OUTPUT"
+        run: bash tools/community/judge.sh ./target/release/unilux "$SUB" "$ISSUE" . | tee -a "$GITHUB_OUTPUT"
       - name: Open the pull request
         if: steps.judge.outputs.ok == 'true'
         env:
@@ -53,8 +53,8 @@ jobs:
           ISSUE: ${{ github.event.issue.number }}
         run: |
           branch="community/$ID-issue$ISSUE"
-          git config user.name "aasl-bot"
-          git config user.email "aasl-bot@users.noreply.github.com"
+          git config user.name "unilux-bot"
+          git config user.email "unilux-bot@users.noreply.github.com"
           git checkout -B "$branch"
           git add "community/recipes/$ID"
           git commit -m "community($ID): recipe and reports from #$ISSUE"

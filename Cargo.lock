@@ -3,207 +3,6 @@
 version = 4
 
 [[package]]
-name = "aasl-agent"
-version = "0.3.0"
-dependencies = [
- "aasl-components",
- "aasl-core",
- "aasl-diag",
- "aasl-service",
- "aasl-system",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
-]
-
-[[package]]
-name = "aasl-cli"
-version = "0.3.0"
-dependencies = [
- "aasl-agent",
- "aasl-components",
- "aasl-core",
- "aasl-diag",
- "aasl-patches",
- "aasl-service",
- "aasl-system",
- "clap",
- "nix",
- "serde",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "aasl-components"
-version = "0.3.0"
-dependencies = [
- "aasl-core",
- "flate2",
- "futures-util",
- "hex",
- "reqwest",
- "serde",
- "serde_json",
- "sha2",
- "tar",
- "tempfile",
- "tokio",
- "tracing",
- "wiremock",
- "xz2",
- "zstd",
-]
-
-[[package]]
-name = "aasl-core"
-version = "0.3.0"
-dependencies = [
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.21",
- "tokio",
- "toml",
-]
-
-[[package]]
-name = "aasl-diag"
-version = "0.3.0"
-dependencies = [
- "aasl-components",
- "aasl-core",
- "aasl-install",
- "aasl-patches",
- "aasl-system",
- "serde",
- "serde_json",
- "tempfile",
-]
-
-[[package]]
-name = "aasl-gui"
-version = "0.3.0"
-dependencies = [
- "aasl-agent",
- "aasl-components",
- "aasl-core",
- "aasl-diag",
- "aasl-patches",
- "aasl-service",
- "aasl-system",
- "aasl-update",
- "chrono",
- "freya",
- "freya-testing",
- "rfd",
- "serde_json",
- "tempfile",
- "tokio",
-]
-
-[[package]]
-name = "aasl-install"
-version = "0.3.0"
-dependencies = [
- "aasl-components",
- "aasl-core",
- "aasl-patches",
- "aasl-system",
- "flate2",
- "hex",
- "nix",
- "serde",
- "serde_json",
- "sha2",
- "tar",
- "tempfile",
- "tokio",
- "tracing",
- "wiremock",
-]
-
-[[package]]
-name = "aasl-patches"
-version = "0.3.0"
-dependencies = [
- "aasl-components",
- "aasl-core",
- "hex",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
- "tokio",
- "toml",
-]
-
-[[package]]
-name = "aasl-runner"
-version = "0.3.0"
-dependencies = [
- "aasl-components",
- "aasl-core",
- "aasl-install",
- "aasl-system",
- "nix",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "aasl-service"
-version = "0.3.0"
-dependencies = [
- "aasl-components",
- "aasl-core",
- "aasl-diag",
- "aasl-install",
- "aasl-patches",
- "aasl-runner",
- "aasl-system",
- "aasl-update",
- "reqwest",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tracing",
- "wiremock",
-]
-
-[[package]]
-name = "aasl-system"
-version = "0.3.0"
-dependencies = [
- "aasl-core",
- "serde",
- "serde_json",
- "tempfile",
-]
-
-[[package]]
-name = "aasl-update"
-version = "0.3.0"
-dependencies = [
- "aasl-components",
- "aasl-core",
- "flate2",
- "hex",
- "serde",
- "serde_json",
- "sha2",
- "tar",
- "tempfile",
- "tokio",
- "wiremock",
-]
-
-[[package]]
 name = "ab_glyph"
 version = "0.2.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5237,6 +5036,207 @@ name = "unicode-segmentation"
 version = "1.13.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c6f5d3c3b1bf09027a88a6bc961fc00497d651009560b5463668dc81b0fa87a8"
+
+[[package]]
+name = "unilux-agent"
+version = "0.3.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "unilux-components",
+ "unilux-core",
+ "unilux-diag",
+ "unilux-service",
+ "unilux-system",
+]
+
+[[package]]
+name = "unilux-cli"
+version = "0.3.0"
+dependencies = [
+ "clap",
+ "nix",
+ "serde",
+ "serde_json",
+ "tokio",
+ "unilux-agent",
+ "unilux-components",
+ "unilux-core",
+ "unilux-diag",
+ "unilux-patches",
+ "unilux-service",
+ "unilux-system",
+]
+
+[[package]]
+name = "unilux-components"
+version = "0.3.0"
+dependencies = [
+ "flate2",
+ "futures-util",
+ "hex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tar",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "unilux-core",
+ "wiremock",
+ "xz2",
+ "zstd",
+]
+
+[[package]]
+name = "unilux-core"
+version = "0.3.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "toml",
+]
+
+[[package]]
+name = "unilux-diag"
+version = "0.3.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "unilux-components",
+ "unilux-core",
+ "unilux-install",
+ "unilux-patches",
+ "unilux-system",
+]
+
+[[package]]
+name = "unilux-gui"
+version = "0.3.0"
+dependencies = [
+ "chrono",
+ "freya",
+ "freya-testing",
+ "rfd",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "unilux-agent",
+ "unilux-components",
+ "unilux-core",
+ "unilux-diag",
+ "unilux-patches",
+ "unilux-service",
+ "unilux-system",
+ "unilux-update",
+]
+
+[[package]]
+name = "unilux-install"
+version = "0.3.0"
+dependencies = [
+ "flate2",
+ "hex",
+ "nix",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tar",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "unilux-components",
+ "unilux-core",
+ "unilux-patches",
+ "unilux-system",
+ "wiremock",
+]
+
+[[package]]
+name = "unilux-patches"
+version = "0.3.0"
+dependencies = [
+ "hex",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tokio",
+ "toml",
+ "unilux-components",
+ "unilux-core",
+]
+
+[[package]]
+name = "unilux-runner"
+version = "0.3.0"
+dependencies = [
+ "nix",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "unilux-components",
+ "unilux-core",
+ "unilux-install",
+ "unilux-system",
+]
+
+[[package]]
+name = "unilux-service"
+version = "0.3.0"
+dependencies = [
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "unilux-components",
+ "unilux-core",
+ "unilux-diag",
+ "unilux-install",
+ "unilux-patches",
+ "unilux-runner",
+ "unilux-system",
+ "unilux-update",
+ "wiremock",
+]
+
+[[package]]
+name = "unilux-system"
+version = "0.3.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "unilux-core",
+]
+
+[[package]]
+name = "unilux-update"
+version = "0.3.0"
+dependencies = [
+ "flate2",
+ "hex",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tar",
+ "tempfile",
+ "tokio",
+ "unilux-components",
+ "unilux-core",
+ "wiremock",
+]
 
 [[package]]
 name = "untrusted"

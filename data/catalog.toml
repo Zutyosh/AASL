@@ -1,6 +1,6 @@
-# AASL catalog: which Proton builds are recommended and which patch
+# Unilux catalog: which Proton builds are recommended and which patch
 # bundles exist for them. Fetched at run time from the main branch, so a
-# new bundle or recommendation does not need an AASL release. A copy is
+# new bundle or recommendation does not need an Unilux release. A copy is
 # embedded in the binary as the offline fallback.
 
 schema = 1
@@ -13,10 +13,10 @@ recommended_proton = "ge:GE-Proton11-12"
 # GE's own winedmo and kernelbase are left alone. Nothing in it comes
 # from the Proton's tree, so later GE-Proton11 releases can use it too.
 [[bundle]]
-id = "aasl-ge11-12-1"
-title = "AASL bundle for GE-Proton11-12"
+id = "unilux-ge11-12-1"
+title = "Unilux bundle for GE-Proton11-12"
 archive_format = 2
-url = "https://github.com/Zutyosh/AASL/releases/download/v0.2.1/aasl-ge-GE-Proton11-12-d5049ac1112c11e1.tar.gz"
+url = "https://github.com/Zutyosh/Unilux/releases/download/v0.2.1/unilux-ge-GE-Proton11-12-d5049ac1112c11e1.tar.gz"
 sha256 = "42ccc9184286d8c45f50c32893ededf4c7ba18118b1862c9d15726a2edb546df"
 series = ["tls"]
 targets = [

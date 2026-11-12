@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Unilux
+GenericName=Somnium Space launcher
+Comment=Install, launch and troubleshoot Somnium Space on Linux
+Exec=unilux-gui
+Icon=unilux
+Terminal=false
+Categories=Game;Utility;
+Keywords=Somnium;VR;OpenXR;Proton;

@@ -1,0 +1,21 @@
+[package]
+name = "unilux-update"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Unilux self-update from GitHub releases"
+
+[dependencies]
+unilux-core.workspace = true
+unilux-components.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tar = "0.4"
+flate2 = "1"
+
+[dev-dependencies]
+tempfile.workspace = true
+wiremock = "0.6"
+sha2 = "0.11"
+hex = "0.4"

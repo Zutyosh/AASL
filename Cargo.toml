@@ -6,20 +6,20 @@ members = ["crates/*"]
 version = "0.3.0"
 edition = "2024"
 license = "MIT"
-repository = "https://github.com/Zutyosh/AASL"
+repository = "https://github.com/Zutyosh/Unilux"
 rust-version = "1.90"
 
 [workspace.dependencies]
-aasl-core = { path = "crates/aasl-core" }
-aasl-system = { path = "crates/aasl-system" }
-aasl-components = { path = "crates/aasl-components" }
-aasl-patches = { path = "crates/aasl-patches" }
-aasl-install = { path = "crates/aasl-install" }
-aasl-runner = { path = "crates/aasl-runner" }
-aasl-diag = { path = "crates/aasl-diag" }
-aasl-service = { path = "crates/aasl-service" }
-aasl-agent = { path = "crates/aasl-agent" }
-aasl-update = { path = "crates/aasl-update" }
+unilux-core = { path = "crates/unilux-core" }
+unilux-system = { path = "crates/unilux-system" }
+unilux-components = { path = "crates/unilux-components" }
+unilux-patches = { path = "crates/unilux-patches" }
+unilux-install = { path = "crates/unilux-install" }
+unilux-runner = { path = "crates/unilux-runner" }
+unilux-diag = { path = "crates/unilux-diag" }
+unilux-service = { path = "crates/unilux-service" }
+unilux-agent = { path = "crates/unilux-agent" }
+unilux-update = { path = "crates/unilux-update" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "1"

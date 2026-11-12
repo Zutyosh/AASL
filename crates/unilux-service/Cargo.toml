@@ -1,0 +1,24 @@
+[package]
+name = "unilux-service"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+unilux-core.workspace = true
+unilux-system.workspace = true
+unilux-components.workspace = true
+unilux-install.workspace = true
+unilux-runner.workspace = true
+unilux-diag.workspace = true
+unilux-patches.workspace = true
+unilux-update.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+reqwest = "0.13"
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+wiremock = "0.6"

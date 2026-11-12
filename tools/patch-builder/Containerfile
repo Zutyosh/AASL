@@ -1,4 +1,4 @@
-# Toolchain for building AASL patch bundles: Wine (64-bit, MinGW PE side)
+# Toolchain for building Unilux patch bundles: Wine (64-bit, MinGW PE side)
 # and ffmpeg with dav1d. Arch is used because its packages track the
 # versions Proton builds against closely.
 FROM docker.io/library/archlinux:base-devel
@@ -9,7 +9,7 @@ RUN pacman -Syu --noconfirm --needed \
         freetype2 fontconfig libunwind patch ffmpeg \
     && pacman -Scc --noconfirm
 
-COPY build.sh /usr/local/bin/aasl-build-patches
-RUN chmod +x /usr/local/bin/aasl-build-patches
+COPY build.sh /usr/local/bin/unilux-build-patches
+RUN chmod +x /usr/local/bin/unilux-build-patches
 WORKDIR /work
-ENTRYPOINT ["/usr/local/bin/aasl-build-patches"]
+ENTRYPOINT ["/usr/local/bin/unilux-build-patches"]

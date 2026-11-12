@@ -26,13 +26,13 @@ jobs:
       - run: python3 -m py_compile tools/community/read_form.py
       - name: Community recipes still check
         env:
-          AASL_PATCHES_DIR: ${{ github.workspace }}/patches
-        run: cargo run -q --release -p aasl-cli -- community index community --strict
-      - run: cargo build --release -p aasl-cli
+          UNILUX_PATCHES_DIR: ${{ github.workspace }}/patches
+        run: cargo run -q --release -p unilux-cli -- community index community --strict
+      - run: cargo build --release -p unilux-cli
       - uses: actions/upload-artifact@v4
         with:
-          name: aasl-cli
-          path: target/release/aasl
+          name: unilux-cli
+          path: target/release/unilux
 
   # Run the read-only probes on several distributions. The table of
   # supported systems grows from these and from user reports.
@@ -53,10 +53,10 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: aasl-cli
+          name: unilux-cli
       - name: Probe
         run: |
-          chmod +x ./aasl
-          ./aasl --json system | tee system.json
-          ./aasl --json doctor --offline | tee doctor.json || true
+          chmod +x ./unilux
+          ./unilux --json system | tee system.json
+          ./unilux --json doctor --offline | tee doctor.json || true
           grep -q '"ok":true' system.json

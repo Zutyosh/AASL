@@ -1,0 +1,19 @@
+[package]
+name = "unilux-patches"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Wine patch bundles for Somnium Space: catalog, install, verify and build"
+
+[dependencies]
+unilux-core.workspace = true
+unilux-components.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+tokio.workspace = true
+sha2 = "0.11"
+hex = "0.4"
+
+[dev-dependencies]
+tempfile.workspace = true

@@ -1,4 +1,4 @@
-# The ingredient library: every fix AASL knows, in the shape recipes use.
+# The ingredient library: every fix Unilux knows, in the shape recipes use.
 # A recipe (patches/recipes/*.toml, or your own) picks ingredients by id.
 #
 # kind = "patch": Wine source patches, compiled into DLLs.

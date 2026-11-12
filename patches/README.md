@@ -11,11 +11,11 @@ Wine's license, LGPL-2.1 (see `LICENSE` in this folder).
   declarative fix: Wine patches (`kind = "patch"`) with the tree they
   build on and the DLLs they change, or launch variables (`kind = "env"`).
 - `recipes/`: built-in recipes. A recipe is a Proton (pinned, `latest`,
-  or the one picked in AASL) plus ingredient ids in order.
+  or the one picked in Unilux) plus ingredient ids in order.
 - `wine/`, `ge/`: the patch files.
 
-Everything here is compiled into AASL (`crates/aasl-patches/build.rs`), so
-adding a file needs no code change. `AASL_PATCHES_DIR=<this folder>` makes
+Everything here is compiled into Unilux (`crates/unilux-patches/build.rs`), so
+adding a file needs no code change. `UNILUX_PATCHES_DIR=<this folder>` makes
 a development build read it live.
 
 | Ingredient | Built from | Produces |
@@ -33,13 +33,13 @@ for recipes on older GE-Proton releases.
 ## Recipes
 
 ```sh
-aasl recipe list                     # * marks the recipe in use
-aasl recipe export recommended > mine.toml   # self-contained, patches inlined
+unilux recipe list                     # * marks the recipe in use
+unilux recipe export recommended > mine.toml   # self-contained, patches inlined
 # edit id, title, ingredients; add [[ingredient]] tables for new fixes
-aasl recipe check mine.toml
-aasl recipe import mine.toml
-aasl recipe build mine               # podman/docker, cached by content
-aasl recipe use mine
+unilux recipe check mine.toml
+unilux recipe import mine.toml
+unilux recipe build mine               # podman/docker, cached by content
+unilux recipe use mine
 ```
 
 Recipes carry no scripts: unknown keys are refused, patch names cannot
@@ -65,5 +65,5 @@ recipe; other recipes always use a bundle built for them.
 - The builder stops at the first patch that does not apply and names it,
   so a build doubles as a test of whether a new Proton still needs or
   still accepts an ingredient.
-- `ge/0005` is AASL's own: the yt-dlp options went after Somnium's `--`,
+- `ge/0005` is Unilux's own: the yt-dlp options went after Somnium's `--`,
   so every YouTube video failed with `'--extractor-args' is not a valid URL`.

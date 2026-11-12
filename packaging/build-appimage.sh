@@ -1,35 +1,35 @@
 #!/bin/sh
-# Build AASL-x86_64.AppImage from a release build.
+# Build Unilux-x86_64.AppImage from a release build.
 # Needs appimagetool on PATH: https://github.com/AppImage/appimagetool
 set -eu
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 out="$root/target/appimage"
-appdir="$out/AASL.AppDir"
+appdir="$out/Unilux.AppDir"
 
-cargo build --release --manifest-path "$root/Cargo.toml" -p aasl-cli -p aasl-gui
+cargo build --release --manifest-path "$root/Cargo.toml" -p unilux-cli -p unilux-gui
 
 rm -rf "$appdir"
 mkdir -p "$appdir/usr/bin"
-cp "$root/target/release/aasl" "$root/target/release/aasl-gui" "$appdir/usr/bin/"
-cp "$root/packaging/aasl.desktop" "$appdir/aasl.desktop"
-cp "$root/assets/aasl-256.png" "$appdir/aasl.png"
+cp "$root/target/release/unilux" "$root/target/release/unilux-gui" "$appdir/usr/bin/"
+cp "$root/packaging/unilux.desktop" "$appdir/unilux.desktop"
+cp "$root/assets/unilux-256.png" "$appdir/unilux.png"
 mkdir -p "$appdir/usr/share/icons/hicolor/256x256/apps" "$appdir/usr/share/icons/hicolor/scalable/apps"
-cp "$root/assets/aasl-256.png" "$appdir/usr/share/icons/hicolor/256x256/apps/aasl.png"
-cp "$root/assets/aasl-logo.svg" "$appdir/usr/share/icons/hicolor/scalable/apps/aasl.svg"
+cp "$root/assets/unilux-256.png" "$appdir/usr/share/icons/hicolor/256x256/apps/unilux.png"
+cp "$root/assets/unilux-logo.svg" "$appdir/usr/share/icons/hicolor/scalable/apps/unilux.svg"
 cat > "$appdir/AppRun" <<'EOF'
 #!/bin/sh
 here=$(dirname "$(readlink -f "$0")")
 export PATH="$here/usr/bin:$PATH"
-# Any argument means the command line (aasl --help lists them); none
+# Any argument means the command line (unilux --help lists them); none
 # opens the app.
 if [ "$#" -gt 0 ]; then
-    exec "$here/usr/bin/aasl" "$@"
+    exec "$here/usr/bin/unilux" "$@"
 fi
-exec "$here/usr/bin/aasl-gui"
+exec "$here/usr/bin/unilux-gui"
 EOF
 chmod +x "$appdir/AppRun"
 
-rm -f "$out/AASL-x86_64.AppImage"
-ARCH=x86_64 appimagetool --no-appstream "$appdir" "$out/AASL-x86_64.AppImage"
-echo "$out/AASL-x86_64.AppImage"
+rm -f "$out/Unilux-x86_64.AppImage"
+ARCH=x86_64 appimagetool --no-appstream "$appdir" "$out/Unilux-x86_64.AppImage"
+echo "$out/Unilux-x86_64.AppImage"

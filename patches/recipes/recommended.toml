@@ -1,5 +1,5 @@
-# AASL's default recipe. Copy it to make your own: `aasl recipe export
-# recommended > mine.toml`, edit, then `aasl recipe import mine.toml`.
+# Unilux's default recipe. Copy it to make your own: `unilux recipe export
+# recommended > mine.toml`, edit, then `unilux recipe import mine.toml`.
 format = 1
 id = "recommended"
 title = "Recommended"

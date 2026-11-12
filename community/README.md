@@ -1,16 +1,16 @@
 # Community recipes
 
-Recipes anyone can submit, judged on evidence: the session reports AASL
+Recipes anyone can submit, judged on evidence: the session reports Unilux
 writes after each play session. Nothing here is hand-curated.
 
 ## Submitting
 
-1. Make a recipe (`aasl recipe export recommended > mine.toml`, edit,
-   `aasl recipe import mine.toml`) and play with it in VR through AASL.
-   Each session leaves a report: `aasl session list`.
-2. `aasl recipe verdict mine` shows where it stands, by the same rules as
+1. Make a recipe (`unilux recipe export recommended > mine.toml`, edit,
+   `unilux recipe import mine.toml`) and play with it in VR through Unilux.
+   Each session leaves a report: `unilux session list`.
+2. `unilux recipe verdict mine` shows where it stands, by the same rules as
    below.
-3. `aasl recipe share mine --open` opens the GitHub form, filled in. No
+3. `unilux recipe share mine --open` opens the GitHub form, filled in. No
    developer account or git needed.
 
 A bot checks the recipe, verifies each report against it, comments the
@@ -41,7 +41,7 @@ paths or account data.
 - Frame rates are not compared across machines; the index shows pacing
   (1 % low / average) instead, where 1.0 is perfectly even.
 
-The thresholds live in `crates/aasl-patches/src/community.rs`; AASL and
+The thresholds live in `crates/unilux-patches/src/community.rs`; Unilux and
 the bot run the same code.
 
 ## Review

@@ -1,18 +1,18 @@
 name: Compatibility recipe
-description: Share a recipe with the session reports AASL recorded while you played with it.
+description: Share a recipe with the session reports Unilux recorded while you played with it.
 title: "Recipe: "
 labels: ["recipe"]
 body:
   - type: markdown
     attributes:
       value: |
-        AASL fills this form for you: `aasl recipe share <id> --open` (or Share in the app).
+        Unilux fills this form for you: `unilux recipe share <id> --open` (or Share in the app).
         A bot checks the recipe, judges the reports and opens a pull request. The rules are in community/README.md.
   - type: textarea
     id: recipe
     attributes:
       label: Recipe
-      description: The recipe TOML, as `aasl recipe share` prints it.
+      description: The recipe TOML, as `unilux recipe share` prints it.
       render: toml
     validations:
       required: true
@@ -20,7 +20,7 @@ body:
     id: reports
     attributes:
       label: Session reports
-      description: The JSON array `aasl recipe share` prints. Anonymous (hardware, durations, counts), nothing that names you.
+      description: The JSON array `unilux recipe share` prints. Anonymous (hardware, durations, counts), nothing that names you.
       render: json
     validations:
       required: true

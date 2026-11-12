@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Build an AASL patch bundle for one Proton build.
+# Build an Unilux patch bundle for one Proton build.
 #
 # Adapted from Somnilux's scripts/build-artifacts.sh (MIT, Vulps22). The
-# differences: every input comes from the environment (aasl resolves them),
+# differences: every input comes from the environment (unilux resolves them),
 # the Proton tree is fetched for the requested tag instead of a local
 # checkout, and the series list decides what gets built.
 #
@@ -72,8 +72,8 @@ superseded() {
 
 apply_series_patches() { # tree dir
     local tree="$1" dir="$2" p
-    git -C "$tree" config user.email aasl@localhost
-    git -C "$tree" config user.name aasl
+    git -C "$tree" config user.email unilux@localhost
+    git -C "$tree" config user.name unilux
     for p in "$PATCHES_DIR/$dir"/*.patch; do
         if superseded "$tree" "$PATCHES_DIR/$dir/superseded" "$(basename "$p")"; then
             info "skip $(basename "$p"): this Proton already carries the fix"
@@ -101,7 +101,7 @@ prep_ge_video_rework() { # tree
     # applies cleanly, per Somnilux's notes).
     sed -i 's/winegstreamer\.dll/winedmo.dll/g' "$tree/loader/wine.inf.in" || true
     [ "${#failed[@]}" -eq 0 ] || info "rework patches that did not apply (usually harmless): ${failed[*]}"
-    git -C "$tree" add -A >/dev/null && git -C "$tree" -c user.email=aasl@localhost -c user.name=aasl commit -qm "GE video rework" || true
+    git -C "$tree" add -A >/dev/null && git -C "$tree" -c user.email=unilux@localhost -c user.name=unilux commit -qm "GE video rework" || true
 }
 
 # GE-Proton's full Wine preparation: the same wine-staging, game fixes,
@@ -138,7 +138,7 @@ prep_ge_full() { # tree
     [ "$rc" -eq 0 ] || info "GE preparation exited with $rc (GE's own script tolerates failing hunks)"
     c=$(grep -c '^Hunk .*FAILED\|^[0-9]* out of [0-9]* hunks* FAILED' "$WORK_DIR/ge-wine-prep.log" || true)
     info "GE preparation done; failed hunks: $c"
-    git -C "$tree" add -A >/dev/null && git -C "$tree" -c user.email=aasl@localhost -c user.name=aasl commit -qm "GE wine preparation" || true
+    git -C "$tree" add -A >/dev/null && git -C "$tree" -c user.email=unilux@localhost -c user.name=unilux commit -qm "GE wine preparation" || true
 }
 
 generate_proton_sources() { # tree
@@ -193,8 +193,8 @@ build_series() { # id
         fetch_commit "$tree" "$(series_field "$id" upstream_repo)" "$commit"
     else
         tree="$WORK_DIR/wine-$PROVIDER-$PROTON_TAG"
-        [ -s "$tree/.aasl-prepared" ] || rm -f "$tree/.aasl-prepared"
-        if [ ! -f "$tree/.aasl-prepared" ]; then
+        [ -s "$tree/.unilux-prepared" ] || rm -f "$tree/.unilux-prepared"
+        if [ ! -f "$tree/.unilux-prepared" ]; then
             fetch_commit "$tree" "$WINE_REPO" "$WINE_COMMIT"
             if [ "$(series_field "$id" requires_prep)" = ge-video-rework ]; then
                 if [ "$PROVIDER" = ge ]; then
@@ -203,10 +203,10 @@ build_series() { # id
                     die "series $id needs the winedmo media backend, which $PROVIDER:$PROTON_TAG's Wine does not have. Build with SERIES=tls only."
                 fi
             fi
-            git -C "$tree" rev-parse HEAD > "$tree/.aasl-prepared"
+            git -C "$tree" rev-parse HEAD > "$tree/.unilux-prepared"
         fi
         # Start each build from the prepared tree, not from a previous run's patches.
-        git -C "$tree" reset -q --hard "$(cat "$tree/.aasl-prepared")"
+        git -C "$tree" reset -q --hard "$(cat "$tree/.unilux-prepared")"
     fi
     local before; before=$(git -C "$tree" rev-parse HEAD)
     apply_series_patches "$tree" "$dir"
@@ -242,7 +242,7 @@ build_ffmpeg() {
 main() {
     mkdir -p "$WORK_DIR" "$OUT_DIR"
     rm -rf "$STAGE"; mkdir -p "$STAGE"
-    say "AASL patch bundle for $PROVIDER:$PROTON_TAG (wine $WINE_COMMIT)"
+    say "Unilux patch bundle for $PROVIDER:$PROTON_TAG (wine $WINE_COMMIT)"
     local s
     for s in $SERIES; do build_series "$s"; done
     [ "$WITH_FFMPEG" = 1 ] && build_ffmpeg

@@ -5,7 +5,7 @@ name: Community index
 on:
   push:
     branches: [main]
-    paths: ["community/recipes/**", "patches/**", "crates/aasl-patches/**"]
+    paths: ["community/recipes/**", "patches/**", "crates/unilux-patches/**"]
   workflow_dispatch:
 
 permissions:
@@ -18,17 +18,17 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Build aasl
-        run: cargo build --release -p aasl-cli
+      - name: Build unilux
+        run: cargo build --release -p unilux-cli
       - name: Rebuild the index
         env:
-          AASL_PATCHES_DIR: ${{ github.workspace }}/patches
-        run: ./target/release/aasl community index community --write
+          UNILUX_PATCHES_DIR: ${{ github.workspace }}/patches
+        run: ./target/release/unilux community index community --write
       - name: Commit
         run: |
           git diff --quiet community/index.json && exit 0
-          git config user.name "aasl-bot"
-          git config user.email "aasl-bot@users.noreply.github.com"
+          git config user.name "unilux-bot"
+          git config user.email "unilux-bot@users.noreply.github.com"
           git add community/index.json
           git commit -m "community: rebuild the index"
           git push
