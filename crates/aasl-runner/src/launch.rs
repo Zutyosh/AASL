@@ -73,9 +73,23 @@ impl Launcher {
             ));
         }
         let env = build_env(self.host.as_ref(), &self.config, &proton, &prefix);
-        let mut spec = CommandSpec::new(umu).arg(launcher.display().to_string());
+        let mut spec = self.command(&umu, &launcher);
         spec.env = env.env.clone();
         Ok((spec, env))
+    }
+
+    /// umu-run on the launcher, inside game-performance when it is there.
+    fn command(&self, umu: &Path, launcher: &Path) -> CommandSpec {
+        let wrapper = self
+            .config
+            .performance
+            .then(|| crate::env::performance_wrapper(self.host.as_ref()))
+            .flatten();
+        match wrapper {
+            Some(w) => CommandSpec::new(w).arg(umu.display().to_string()),
+            None => CommandSpec::new(umu),
+        }
+        .arg(launcher.display().to_string())
     }
 
     fn vr(&self) -> aasl_system::VrStatus {
@@ -142,6 +156,12 @@ impl Launcher {
             Severity::Info,
             format!("Detected OpenXR runtime: {}", env.runtime_label),
         );
+        if spec.program.ends_with("game-performance") {
+            self.notice(
+                Severity::Info,
+                "Performance mode: game-performance keeps the CPU at full speed until Somnium exits.",
+            );
+        }
         let log = self.paths.logs_dir().join("somnium.log");
         aasl_core::exec::spawn_logged(&spec, &log, &self.events)
     }
@@ -222,5 +242,27 @@ mod tests {
             cancel: Arc::default(),
         };
         assert!(l.plan().unwrap_err().to_string().contains("install"));
+    }
+
+    #[test]
+    fn game_performance_wraps_umu_when_present() {
+        let mut l = Launcher {
+            paths: Paths::resolve(|k| (k == "HOME").then(|| "/h".into())).unwrap(),
+            config: Config::default(),
+            host: Arc::new(
+                aasl_system::FakeHost::new()
+                    .with_env("PATH", "/usr/bin")
+                    .with_file("/usr/bin/game-performance", ""),
+            ),
+            events: aasl_core::event_bus(),
+            cancel: Arc::default(),
+        };
+        let (umu, exe) = (Path::new("/u/umu-run"), Path::new("/pfx/l.exe"));
+        let c = l.command(umu, exe);
+        assert_eq!(c.program, Path::new("/usr/bin/game-performance"));
+        assert_eq!(c.args, ["/u/umu-run", "/pfx/l.exe"]);
+        l.config.performance = false;
+        let c = l.command(umu, exe);
+        assert_eq!((c.program.as_path(), c.args.len()), (umu, 1));
     }
 }

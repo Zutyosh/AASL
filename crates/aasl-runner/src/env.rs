@@ -8,6 +8,20 @@ use aasl_core::Config;
 use aasl_system::{Host, OpenXrRuntime};
 use serde::Serialize;
 
+/// Larger shader caches: Mesa (AMD, Intel) and NVIDIA.
+pub const SHADER_CACHE: [(&str, &str); 2] = [
+    ("MESA_SHADER_CACHE_MAX_SIZE", "12G"),
+    ("__GL_SHADER_DISK_CACHE_SIZE", "12000000000"),
+];
+
+/// CachyOS's `game-performance` (cachyos-settings): switches
+/// power-profiles-daemon to performance, and an scx scheduler to its gaming
+/// profile, until the wrapped command exits. Feral's gamemode is left out:
+/// it fights ananicy-cpp, which CachyOS runs by default.
+pub fn performance_wrapper(host: &dyn Host) -> Option<std::path::PathBuf> {
+    aasl_system::find_in_path(host, "game-performance")
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct LaunchEnv {
     pub env: BTreeMap<String, String>,
@@ -58,6 +72,16 @@ pub fn build_env(host: &dyn Host, config: &Config, proton: &Path, prefix: &Path)
             None => (None, "none detected".to_string()),
         }
     };
+    if config.performance {
+        // Somnium compiles shaders per world; the default caches (1 GB
+        // Mesa) evict them between sessions. Values from CachyOS's gaming
+        // guide; a value already in the user's environment wins.
+        for (k, v) in SHADER_CACHE {
+            if host.env(k).is_none() {
+                env.insert(k.to_string(), v.to_string());
+            }
+        }
+    }
     env.extend(config.env.clone());
     LaunchEnv {
         env,
@@ -102,6 +126,20 @@ mod tests {
         assert_eq!(e.env["XR_RUNTIME_JSON"], "/x.json");
         assert_eq!(e.env["GAMEID"], "custom");
         assert!(e.runtime.is_none());
+    }
+
+    #[test]
+    fn shader_cache_unless_set_or_off() {
+        let h = FakeHost::new().with_env("__GL_SHADER_DISK_CACHE_SIZE", "1");
+        let e = build_env(&h, &Config::default(), "/p".as_ref(), "/pfx".as_ref());
+        assert_eq!(e.env["MESA_SHADER_CACHE_MAX_SIZE"], "12G");
+        assert!(!e.env.contains_key("__GL_SHADER_DISK_CACHE_SIZE"));
+        let off = Config {
+            performance: false,
+            ..Default::default()
+        };
+        let e = build_env(&FakeHost::new(), &off, "/p".as_ref(), "/pfx".as_ref());
+        assert!(!e.env.contains_key("MESA_SHADER_CACHE_MAX_SIZE"));
     }
 
     #[test]

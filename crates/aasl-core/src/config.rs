@@ -42,6 +42,10 @@ pub struct Config {
     pub locale: Option<String>,
     /// Look for a newer AASL at start-up.
     pub check_updates: bool,
+    /// Boost the system while Somnium runs: CachyOS's game-performance
+    /// wrapper when installed (CPU in performance until the game exits)
+    /// and a 12 GB shader cache.
+    pub performance: bool,
     /// `stable` or `beta` (pre-releases too).
     pub update_channel: String,
 }
@@ -62,6 +66,7 @@ impl Default for Config {
             env: BTreeMap::new(),
             locale: None,
             check_updates: true,
+            performance: true,
             update_channel: "stable".into(),
         }
     }

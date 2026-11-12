@@ -340,6 +340,26 @@ fn view(mut ui: Ui) -> impl IntoElement {
             Err(e) => ui.error.set(Some(e.to_string())),
         }
     });
+    let mut perf = use_state(|| svc().config().performance);
+    let perf_setter = WritableSetter::new(perf, move |v: bool| {
+        let mut cfg = svc().config();
+        cfg.performance = v;
+        match svc().set_config(cfg) {
+            Ok(()) => perf.set(v),
+            Err(e) => ui.error.set(Some(e.to_string())),
+        }
+    });
+    let perf_sub = if svc().performance_wrapper().is_some() {
+        tr(
+            "CachyOS's game-performance keeps the CPU at full speed until Somnium exits, and the shader cache grows to 12 GB so worlds do not recompile.",
+            "game-performance de CachyOS garde le processeur à pleine vitesse jusqu'à la fermeture de Somnium, et le cache de shaders passe à 12 Go pour ne pas tout recompiler à chaque monde.",
+        )
+    } else {
+        tr(
+            "The shader cache grows to 12 GB so worlds do not recompile. On CachyOS, game-performance (cachyos-settings) also keeps the CPU at full speed.",
+            "Le cache de shaders passe à 12 Go pour ne pas tout recompiler à chaque monde. Sur CachyOS, game-performance (cachyos-settings) garde aussi le processeur à pleine vitesse.",
+        )
+    };
     // The runtime comes and goes while the user starts WiVRn: follow it.
     use_future(move || async move {
         loop {
@@ -477,6 +497,10 @@ fn view(mut ui: Ui) -> impl IntoElement {
                     .into(),
                 ),
                 Some(Switch::new(wait_setter).into_element()),
+            ), crate::widgets::row(
+                tr("Performance mode", "Mode performance"),
+                Some(perf_sub.into()),
+                Some(Switch::new(perf_setter).into_element()),
             )],
         ))
         .child(group(

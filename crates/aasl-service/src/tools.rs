@@ -72,6 +72,11 @@ impl Service {
         aasl_system::vr_status(self.inner.host.as_ref(), &names)
     }
 
+    /// CachyOS's game-performance, when launches can run inside it.
+    pub fn performance_wrapper(&self) -> Option<PathBuf> {
+        aasl_runner::performance_wrapper(self.inner.host.as_ref())
+    }
+
     pub fn providers(&self) -> &'static [Provider] {
         PROVIDERS
     }
